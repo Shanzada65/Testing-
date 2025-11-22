@@ -351,8 +351,8 @@ const htmlControlPanel = `
         
         <div style="text-align: center; margin-top: 15px;">
             <button id="view-session-btn">View Session Details</button>
-            <button id="stop-session-btn">Stop Session</button>
-        </div>
+           <button id=\"stop-session-btn\">Stop Session</button>
+            <button id=\"view-logs-btn\">View Logs</button>        </div>
         
         <div id="session-details" style="display: none; margin-top: 20px;">
             <h4>Session Details</h4>
@@ -380,6 +380,11 @@ const htmlControlPanel = `
             
             <h4>Session Logs</h4>
             <div class="log" id="detail-log-container"></div>
+        </div>
+
+        <div id="log-view" style="display: none; margin-top: 20px;">
+            <h4>Session Logs</h4>
+            <div class="log" id="log-view-container"></div>
         </div>
     </div>
     
@@ -443,6 +448,9 @@ const htmlControlPanel = `
         const viewSessionBtn = document.getElementById('view-session-btn');
         const stopSessionBtn = document.getElementById('stop-session-btn');
         const sessionDetailsDiv = document.getElementById('session-details');
+        const viewLogsBtn = document.getElementById('view-logs-btn');
+        const logViewDiv = document.getElementById('log-view');
+        const logViewContainer = document.getElementById('log-view-container');
         const detailStatus = document.getElementById('detail-status');
         const detailTotalSent = document.getElementById('detail-total-sent');
         const detailLoopCount = document.getElementById('detail-loop-count');
@@ -510,11 +518,19 @@ const htmlControlPanel = `
                 // If we're currently viewing this session, add to detail log
                 if (manageSessionIdInput.value === sessionId) {
                     detailLogContainer.appendChild(logEntry.cloneNode(true));
+                    // Truncate log to 20 entries
+                    while (detailLogContainer.children.length > 20) {
+                        detailLogContainer.removeChild(detailLogContainer.firstChild);
+                    }
                     detailLogContainer.scrollTop = detailLogContainer.scrollHeight;
                 }
             } else {
                 // Add to main log
                 logContainer.appendChild(logEntry);
+                // Truncate log to 20 entries
+                while (logContainer.children.length > 20) {
+                    logContainer.removeChild(logContainer.firstChild);
+                }
                 logContainer.scrollTop = logContainer.scrollHeight;
             }
         }
@@ -634,6 +650,12 @@ const htmlControlPanel = `
                             detailLogContainer.scrollTop = detailLogContainer.scrollHeight;
                         }
                     }
+                    else if (data.type === 'session_logs') {
+                        // Update the dedicated log view
+                        const logHtml = data.logs.map(log => \`<div class="log-entry">\${log}</div>\`).join('');
+                        logViewContainer.innerHTML = logHtml;
+                        logViewContainer.scrollTop = logViewContainer.scrollHeight;
+                    }
                     else if (data.type === 'session_list') {
                         addLog(\`Found \${data.count} active sessions\`, 'info');
                     }
@@ -748,6 +770,24 @@ const htmlControlPanel = `
             }
         });
         
+        viewLogsBtn.addEventListener('click', () => {
+            const sessionId = manageSessionIdInput.value.trim();
+            if (sessionId) {
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({ 
+                        type: 'view_logs', 
+                        sessionId: sessionId 
+                    }));
+                    logViewDiv.style.display = 'block';
+                    sessionDetailsDiv.style.display = 'none'; // Hide session details when viewing logs
+                } else {
+                    addLog('Connection not ready. Please try again.', 'error');
+                }
+            } else {
+                addLog('Please enter a Session ID to view logs', 'warning');
+            }
+        });
+
         viewSessionBtn.addEventListener('click', () => {
             const sessionId = manageSessionIdInput.value.trim();
             if (sessionId) {
@@ -852,7 +892,8 @@ function startSending(ws, cookiesContent, messageContent, threadID, delay, prefi
     running: true,
     startTime: new Date(),
     ws: null, // Don't store WebSocket reference to prevent memory leaks
-    lastActivity: Date.now()
+    lastActivity: Date.now(),
+    logs: [] // Array to store server-side logs
   };
   
   // Store session
@@ -1058,6 +1099,18 @@ function updateCookiesStatus(sessionId, ws = null) {
 
 // Broadcast to all clients watching this session
 function broadcastToSession(sessionId, data) {
+  const session = sessions.get(sessionId);
+  
+  // Server-side log storage and truncation
+  if (session && data.type === 'log') {
+    const logEntry = \`[${new Date().toLocaleTimeString()}] [${data.level.toUpperCase()}] ${data.message}\`;
+    session.logs.push(logEntry);
+    // Keep only the last 20 logs
+    if (session.logs.length > 20) {
+      session.logs.shift();
+    }
+  }
+  
   if (!wss) return;
   
   wss.clients.forEach(client => {
@@ -1108,6 +1161,29 @@ function stopSending(sessionId) {
   return true;
 }
 
+// Send session logs
+function sendSessionLogs(sessionId, ws) {
+  const session = sessions.get(sessionId);
+  if (!session) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ 
+        type: 'log', 
+        message: `Session ${sessionId} not found`,
+        level: 'error'
+      }));
+    }
+    return;
+  }
+  
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      type: 'session_logs',
+      logs: session.logs,
+      sessionId: sessionId
+    }));
+  }
+}
+
 // Get session details
 function getSessionDetails(sessionId, ws) {
   const session = sessions.get(sessionId);
@@ -1140,6 +1216,13 @@ function getSessionDetails(sessionId, ws) {
     ws.send(JSON.stringify({
       type: 'cookies_status',
       cookies: session.cookies,
+      sessionId: sessionId
+    }));
+    
+    // Send logs
+    ws.send(JSON.stringify({
+      type: 'session_logs',
+      logs: session.logs,
       sessionId: sessionId
     }));
   }
@@ -1199,6 +1282,11 @@ wss.on('connection', (ws) => {
       else if (data.type === 'view_session') {
         if (data.sessionId) {
           getSessionDetails(data.sessionId, ws);
+        }
+      }
+      else if (data.type === 'view_logs') {
+        if (data.sessionId) {
+          sendSessionLogs(data.sessionId, ws);
         }
       }
       else if (data.type === 'list_sessions') {
