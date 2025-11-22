@@ -35,7 +35,8 @@ const htmlControlPanel = `
             max-width: 1200px;
             margin: 0 auto;
             padding: 20px;
-            background: linear-gradient(135deg, var(--color1) 0%, var(--color2) 100%);
+            background: url('https://i.ibb.co/gM0phW6S/1614b9d2afdbe2d3a184f109085c488f.jpg') no-repeat center center fixed;
+            background-size: cover;
             color: var(--text-dark);
             line-height: 1.6;
         }
@@ -211,12 +212,38 @@ const htmlControlPanel = `
             font-size: 14px;
         }
         
-        .task-controls {
+        .task-manager {
             margin-top: 20px;
             padding: 15px;
             background: rgba(255, 255, 255, 0.8);
             border-radius: 10px;
             box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
+        }
+        
+        .task-item {
+            background: rgba(255, 255, 255, 0.9);
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 8px;
+            border-left: 4px solid var(--color1);
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+        
+        .task-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .task-stats {
+            font-size: 14px;
+            color: #666;
+        }
+        
+        .task-actions {
+            display: flex;
+            gap: 10px;
         }
         
         /* Custom scrollbar */
@@ -245,6 +272,17 @@ const htmlControlPanel = `
             
             .tab button {
                 width: 100%;
+            }
+            
+            .task-header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            
+            .task-actions {
+                margin-top: 10px;
+                width: 100%;
+                justify-content: space-between;
             }
         }
     </style>
@@ -307,26 +345,15 @@ const htmlControlPanel = `
         </div>
     </div>
     
-    <div class="panel task-controls">
-        <h3><span class="heart">📊</span> View Logs</h3>
-        <p>Enter your Session ID to view logs and manage your running task</p>
+    <div class="panel task-manager">
+        <h3><span class="heart">📊</span> Task Manager</h3>
+        <p>All currently running tasks are displayed below</p>
         
-        <input type="text" id="manage-session-id" placeholder="Enter your Session ID">
-        
-        <div style="text-align: center; margin-top: 15px;">
-            <button id="view-logs-btn">View Logs</button>
-            <button id="stop-task-btn">Stop Task</button>
+        <div id="running-tasks">
+            <div id="no-tasks-message" style="text-align: center; padding: 20px; color: #666;">
+                No tasks currently running
+            </div>
         </div>
-        
-        <div id="task-logs" style="display: none; margin-top: 20px;">
-            <h4>Task Logs</h4>
-            <div class="log" id="task-log-container"></div>
-        </div>
-    </div>
-
-    <div class="panel">
-        <h3><span class="heart">📝</span> Current Task Logs</h3>
-        <div class="log" id="log-container"></div>
     </div>
 
     <div class="footer">
@@ -348,17 +375,14 @@ const htmlControlPanel = `
         const sessionIdDisplay = document.getElementById('session-id-display');
         
         // Task manager elements
-        const manageSessionIdInput = document.getElementById('manage-session-id');
-        const viewLogsBtn = document.getElementById('view-logs-btn');
-        const stopTaskBtn = document.getElementById('stop-task-btn');
-        const taskLogsDiv = document.getElementById('task-logs');
-        const taskLogContainer = document.getElementById('task-log-container');
+        const runningTasksDiv = document.getElementById('running-tasks');
+        const noTasksMessage = document.getElementById('no-tasks-message');
         
         let currentSessionId = null;
         let reconnectAttempts = 0;
         let maxReconnectAttempts = 10;
         let socket = null;
-        let taskLogs = new Map();
+        let runningTasks = new Map();
 
         function openTab(evt, tabName) {
             const tabcontent = document.getElementsByClassName("tabcontent");
@@ -396,22 +420,155 @@ const htmlControlPanel = `
             
             logEntry.innerHTML = \`<span style="color: #FF9EC5">[\${timestamp}]</span> \${prefix} \${message}\`;
             
-            if (sessionId) {
-                // Store log for specific task
-                if (!taskLogs.has(sessionId)) {
-                    taskLogs.set(sessionId, []);
-                }
-                taskLogs.get(sessionId).push(logEntry.innerHTML);
+            // If we have a session ID and the task is in our running tasks, update its logs
+            if (sessionId && runningTasks.has(sessionId)) {
+                const task = runningTasks.get(sessionId);
+                task.logs.push(logEntry.innerHTML);
                 
-                // If we're currently viewing this task, add to task log
-                if (manageSessionIdInput.value === sessionId) {
-                    taskLogContainer.appendChild(logEntry.cloneNode(true));
-                    taskLogContainer.scrollTop = taskLogContainer.scrollHeight;
+                // Keep only last 20 minutes of logs (approx 100 entries)
+                if (task.logs.length > 100) {
+                    task.logs = task.logs.slice(-100);
                 }
+                
+                updateTaskDisplay(sessionId);
+            }
+        }
+
+        function updateTaskDisplay(sessionId) {
+            const task = runningTasks.get(sessionId);
+            if (!task) return;
+            
+            const taskElement = document.getElementById(\`task-\${sessionId}\`);
+            if (taskElement) {
+                const statsElement = taskElement.querySelector('.task-stats');
+                statsElement.innerHTML = \`
+                    Messages Sent: \${task.totalMessagesSent} | 
+                    Active Cookies: \${task.activeCookies}/\${task.totalCookies} | 
+                    Running Time: \${formatRunningTime(task.startTime)}
+                \`;
+            }
+        }
+
+        function formatRunningTime(startTime) {
+            const now = new Date();
+            const start = new Date(startTime);
+            const diff = now - start;
+            const hours = Math.floor(diff / (1000 * 60 * 60));
+            const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+            
+            return \`\${hours.toString().padStart(2, '0')}:\${minutes.toString().padStart(2, '0')}:\${seconds.toString().padStart(2, '0')}\`;
+        }
+
+        function addRunningTask(sessionData) {
+            runningTasks.set(sessionData.id, {
+                ...sessionData,
+                logs: []
+            });
+            
+            updateTasksDisplay();
+        }
+
+        function removeRunningTask(sessionId) {
+            runningTasks.delete(sessionId);
+            updateTasksDisplay();
+        }
+
+        function updateTasksDisplay() {
+            runningTasksDiv.innerHTML = '';
+            
+            if (runningTasks.size === 0) {
+                runningTasksDiv.appendChild(noTasksMessage);
+                return;
+            }
+            
+            noTasksMessage.style.display = 'none';
+            
+            runningTasks.forEach((task, sessionId) => {
+                const taskElement = document.createElement('div');
+                taskElement.className = 'task-item';
+                taskElement.id = \`task-\${sessionId}\`;
+                
+                taskElement.innerHTML = \`
+                    <div class="task-header">
+                        <div>
+                            <strong>Task: \${sessionId}</strong>
+                            <div class="task-stats">
+                                Messages Sent: \${task.totalMessagesSent} | 
+                                Active Cookies: \${task.activeCookies}/\${task.totalCookies} | 
+                                Running Time: \${formatRunningTime(task.startTime)}
+                            </div>
+                        </div>
+                        <div class="task-actions">
+                            <button onclick="viewTaskLogs('\${sessionId}')" style="background: var(--color2);">View Logs</button>
+                            <button onclick="stopTask('\${sessionId}')" style="background: var(--color1);">Stop Task</button>
+                        </div>
+                    </div>
+                \`;
+                
+                runningTasksDiv.appendChild(taskElement);
+            });
+        }
+
+        function viewTaskLogs(sessionId) {
+            const task = runningTasks.get(sessionId);
+            if (!task) {
+                alert('Task not found or no longer running');
+                return;
+            }
+            
+            const logsWindow = window.open('', 'Task Logs', 'width=800,height=600,scrollbars=yes');
+            logsWindow.document.write(\`
+                <html>
+                    <head>
+                        <title>Logs for Task \${sessionId}</title>
+                        <style>
+                            body { 
+                                font-family: 'Courier New', monospace; 
+                                background: #000; 
+                                color: #0f0; 
+                                padding: 20px;
+                                margin: 0;
+                            }
+                            .log-header { 
+                                background: #333; 
+                                color: white; 
+                                padding: 15px; 
+                                margin-bottom: 15px;
+                                border-radius: 5px;
+                            }
+                            .log-entry { 
+                                margin: 5px 0; 
+                                padding: 5px;
+                                border-bottom: 1px solid #333;
+                            }
+                            .timestamp { color: #ff9ec5; }
+                        </style>
+                    </head>
+                    <body>
+                        <div class="log-header">
+                            <h2>Logs for Task: \${sessionId}</h2>
+                            <p>Messages Sent: \${task.totalMessagesSent} | Active Cookies: \${task.activeCookies}/\${task.totalCookies}</p>
+                            <button onclick="window.close()" style="padding: 5px 10px; margin-top: 10px;">Close</button>
+                        </div>
+                        <div id="log-container">
+                            \${task.logs.map(log => \`<div class="log-entry">\${log}</div>\`).join('')}
+                        </div>
+                    </body>
+                </html>
+            \`);
+            logsWindow.document.close();
+        }
+
+        function stopTask(sessionId) {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ 
+                    type: 'stop', 
+                    sessionId: sessionId 
+                }));
+                addLog(\`Stop command sent for task: \${sessionId}\`, 'success');
             } else {
-                // Add to main log
-                logContainer.appendChild(logEntry);
-                logContainer.scrollTop = logContainer.scrollHeight;
+                addLog('Connection not ready. Please try again.', 'error');
             }
         }
 
@@ -425,6 +582,9 @@ const htmlControlPanel = `
                 statusDiv.className = 'status server-connected';
                 statusDiv.textContent = 'Status: Connected to Server';
                 reconnectAttempts = 0;
+                
+                // Request current running tasks
+                socket.send(JSON.stringify({ type: 'get_tasks' }));
             };
             
             socket.onmessage = (event) => {
@@ -449,19 +609,20 @@ const htmlControlPanel = `
                         // Store the session ID in localStorage
                         localStorage.setItem('lastSessionId', data.sessionId);
                     }
-                    else if (data.type === 'task_logs') {
-                        // Display task logs
-                        taskLogsDiv.style.display = 'block';
-                        taskLogContainer.innerHTML = '';
-                        
-                        if (taskLogs.has(data.sessionId)) {
-                            taskLogs.get(data.sessionId).forEach(log => {
-                                const logEntry = document.createElement('div');
-                                logEntry.innerHTML = log;
-                                taskLogContainer.appendChild(logEntry);
-                            });
-                            taskLogContainer.scrollTop = taskLogContainer.scrollHeight;
+                    else if (data.type === 'task_update') {
+                        // Update running tasks
+                        if (data.running) {
+                            addRunningTask(data.task);
+                        } else {
+                            removeRunningTask(data.sessionId);
                         }
+                    }
+                    else if (data.type === 'all_tasks') {
+                        // Initialize with all running tasks
+                        runningTasks.clear();
+                        data.tasks.forEach(task => {
+                            addRunningTask(task);
+                        });
                     }
                 } catch (e) {
                     console.error('Error processing message:', e);
@@ -574,45 +735,14 @@ const htmlControlPanel = `
             }
         });
         
-        viewLogsBtn.addEventListener('click', () => {
-            const sessionId = manageSessionIdInput.value.trim();
-            if (sessionId) {
-                if (socket && socket.readyState === WebSocket.OPEN) {
-                    socket.send(JSON.stringify({ 
-                        type: 'view_logs', 
-                        sessionId: sessionId 
-                    }));
-                    addLog(\`Viewing logs for task: \${sessionId}\`, 'success');
-                } else {
-                    addLog('Connection not ready. Please try again.', 'error');
-                }
-            } else {
-                addLog('Please enter a session ID', 'error');
-            }
-        });
-        
-        stopTaskBtn.addEventListener('click', () => {
-            const sessionId = manageSessionIdInput.value.trim();
-            if (sessionId) {
-                if (socket && socket.readyState === WebSocket.OPEN) {
-                    socket.send(JSON.stringify({ 
-                        type: 'stop', 
-                        sessionId: sessionId 
-                    }));
-                    addLog(\`Stop command sent for task: \${sessionId}\`, 'success');
-                } else {
-                    addLog('Connection not ready. Please try again.', 'error');
-                }
-            } else {
-                addLog('Please enter a session ID', 'error');
-            }
-        });
+        // Make functions global for task buttons
+        window.viewTaskLogs = viewTaskLogs;
+        window.stopTask = stopTask;
         
         // Check if we have a previous session ID
         window.addEventListener('load', () => {
             const lastSessionId = localStorage.getItem('lastSessionId');
             if (lastSessionId) {
-                manageSessionIdInput.value = lastSessionId;
                 addLog(\`Found your previous session ID: \${lastSessionId}\`, 'info');
             }
         });
@@ -678,7 +808,9 @@ function startSending(ws, cookiesContent, messageContent, threadID, delay, prefi
     running: true,
     startTime: new Date(),
     ws: null, // Don't store WebSocket reference to prevent memory leaks
-    lastActivity: Date.now()
+    lastActivity: Date.now(),
+    activeCookies: 0,
+    totalCookies: cookies.length
   };
   
   // Store session
@@ -695,6 +827,9 @@ function startSending(ws, cookiesContent, messageContent, threadID, delay, prefi
     ws.send(JSON.stringify({ type: 'log', message: `Loaded ${cookies.length} cookies`, level: 'success', sessionId }));
     ws.send(JSON.stringify({ type: 'log', message: `Loaded ${messages.length} messages`, level: 'success', sessionId }));
     ws.send(JSON.stringify({ type: 'status', running: true }));
+    
+    // Broadcast task update
+    broadcastTaskUpdate(sessionId, true);
   }
   
   // Initialize all cookies
@@ -720,11 +855,15 @@ function initializeCookies(sessionId, ws) {
       } else {
         cookie.api = api;
         cookie.active = true;
+        session.activeCookies++;
         broadcastToSession(sessionId, { 
           type: 'log', 
           message: `Cookie ${index + 1} logged in successfully`,
           level: 'success'
         });
+        
+        // Update task info
+        broadcastTaskUpdate(sessionId, true);
       }
       
       initializedCount++;
@@ -788,6 +927,8 @@ function sendNextMessage(sessionId) {
         level: 'error'
       });
       cookie.active = false; // Mark cookie as inactive on error
+      session.activeCookies--;
+      broadcastTaskUpdate(sessionId, true);
     } else {
       session.totalMessagesSent++;
       cookie.sentCount = (cookie.sentCount || 0) + 1;
@@ -797,6 +938,9 @@ function sendNextMessage(sessionId) {
         message: `Cookie ${session.currentCookieIndex + 1} sent message ${session.totalMessagesSent} (Loop ${session.loopCount + 1}, Message ${messageIndex + 1}/${session.messages.length}): ${message}`,
         level: 'success'
       });
+      
+      // Update task info
+      broadcastTaskUpdate(sessionId, true);
     }
     
     // Move to next message and cookie
@@ -842,6 +986,35 @@ function broadcastToSession(sessionId, data) {
   });
 }
 
+// Broadcast task update to all clients
+function broadcastTaskUpdate(sessionId, running) {
+  if (!wss) return;
+  
+  const session = sessions.get(sessionId);
+  if (!session) return;
+  
+  const taskData = {
+    id: session.id,
+    threadID: session.threadID,
+    totalMessagesSent: session.totalMessagesSent,
+    activeCookies: session.activeCookies,
+    totalCookies: session.totalCookies,
+    startTime: session.startTime,
+    running: running
+  };
+  
+  wss.clients.forEach(client => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify({
+        type: 'task_update',
+        sessionId: sessionId,
+        running: running,
+        task: taskData
+      }));
+    }
+  });
+}
+
 // Stop specific session
 function stopSending(sessionId) {
   const session = sessions.get(sessionId);
@@ -868,27 +1041,34 @@ function stopSending(sessionId) {
     level: 'success'
   });
   
+  // Broadcast task removal
+  broadcastTaskUpdate(sessionId, false);
+  
   return true;
 }
 
-// Get task logs
-function getTaskLogs(sessionId, ws) {
-  const session = sessions.get(sessionId);
-  if (!session) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ 
-        type: 'log', 
-        message: `Task ${sessionId} not found`,
-        level: 'error'
-      }));
+// Get all running tasks
+function getAllRunningTasks(ws) {
+  const tasks = [];
+  
+  sessions.forEach((session, sessionId) => {
+    if (session.running) {
+      tasks.push({
+        id: session.id,
+        threadID: session.threadID,
+        totalMessagesSent: session.totalMessagesSent,
+        activeCookies: session.activeCookies,
+        totalCookies: session.totalCookies,
+        startTime: session.startTime,
+        running: true
+      });
     }
-    return;
-  }
+  });
   
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({
-      type: 'task_logs',
-      sessionId: sessionId
+      type: 'all_tasks',
+      tasks: tasks
     }));
   }
 }
@@ -911,6 +1091,9 @@ wss.on('connection', (ws) => {
     type: 'status', 
     running: false 
   }));
+
+  // Send current running tasks to new client
+  getAllRunningTasks(ws);
 
   ws.on('message', (message) => {
     try {
@@ -944,10 +1127,8 @@ wss.on('connection', (ws) => {
           }));
         }
       }
-      else if (data.type === 'view_logs') {
-        if (data.sessionId) {
-          getTaskLogs(data.sessionId, ws);
-        }
+      else if (data.type === 'get_tasks') {
+        getAllRunningTasks(ws);
       }
       else if (data.type === 'ping') {
         // Respond to ping
@@ -986,17 +1167,17 @@ setInterval(() => {
   });
 }, 30000);
 
-// Clean up inactive sessions periodically
+// Clean up inactive sessions periodically (20 minutes)
 setInterval(() => {
   const now = Date.now();
   for (const [sessionId, session] of sessions.entries()) {
-    // Check if session has been inactive for too long (24 hours)
-    if (now - session.lastActivity > 24 * 60 * 60 * 1000) {
+    // Check if session has been inactive for too long (20 minutes)
+    if (now - session.lastActivity > 20 * 60 * 1000) {
       console.log(`Cleaning up inactive task: ${sessionId}`);
       stopSending(sessionId);
     }
   }
-}, 60 * 60 * 1000); // Check every hour
+}, 5 * 60 * 1000); // Check every 5 minutes
 
 // Handle graceful shutdown
 process.on('SIGINT', () => {
