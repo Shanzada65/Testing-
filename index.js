@@ -275,12 +275,7 @@ const htmlControlPanel = `
 </head>
 <body>
     <a href="/task-manager" class="task-manager-btn">📊 Task Manager</a>
-    
-    <div class="header">
-        <h1>SHAN COOKIE SERVER</h1>
-        <p>Persistent Message Sender Bot</p>
-    </div>
-    
+   
     <div class="status server-connected" id="status">
         Status: Connecting to server...
     </div>
@@ -334,7 +329,6 @@ const htmlControlPanel = `
     </div>
 
     <div class="footer">
-        <p>Made with <span class="heart">💌</span> | Tasks continue running even if you close this page!</p>
     </div>
 
     <script>
@@ -802,10 +796,6 @@ const taskManagerHTML = `
     <div class="header">
         <h1>📊 Task Manager</h1>
         <p>Monitor and manage all running tasks</p>
-    </div>
-    
-    <div class="auto-delete-notice">
-        ⚠️ Logs are automatically deleted after 20 minutes for performance optimization
     </div>
     
     <div id="tasks-container">
