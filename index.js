@@ -288,11 +288,7 @@ const htmlControlPanel = `
     </style>
 </head>
 <body>
-    <div class="header">
-        <h1><span class="heart">❤️</span> SHAN COOKIE SERVER FOR CONVO <span class="heart">❤️</span></h1>
-        <p>COOKIE SERVER FOR CONVO</p>
     </div>
-    
     <div class="status server-connected" id="status">
         Status: Connecting to server...
     </div>
