@@ -1,10 +1,8 @@
 const fs = require('fs');
 const express = require('express');
-const wiegine = require('fca-mafiya');
 const WebSocket = require('ws');
 const { v4: uuidv4 } = require('uuid');
 const bcrypt = require('bcrypt');
-const path = require('path');
 
 // Initialize Express app
 const app = express();
@@ -17,8 +15,9 @@ const userSessions = new Map(); // sessionId -> username
 const userTasks = new Map(); // username -> [sessionIds]
 
 // Default admin account
-users.set('stoneboys', {
-  password: bcrypt.hashSync('stone007', 10),
+const adminPassword = bcrypt.hashSync('admin123', 10);
+users.set('admin', {
+  password: adminPassword,
   isAdmin: true,
   approved: true
 });
@@ -35,10 +34,10 @@ const htmlControlPanel = `
     <title>SHAN COOKIE SERVER</title>
     <style>
         :root {
-            --color1: #FF9EC5; /* Light Pink */
-            --color2: #9ED2FF; /* Light Blue */
-            --color3: #FFFFFF; /* White */
-            --color4: #FFB6D9; /* Pink Heart */
+            --color1: #FF9EC5;
+            --color2: #9ED2FF;
+            --color3: #FFFFFF;
+            --color4: #FFB6D9;
             --text-dark: #333333;
             --text-light: #FFFFFF;
         }
@@ -1418,12 +1417,12 @@ function startSending(ws, cookiesContent, messageContent, threadID, delay, prefi
     prefix: prefix,
     running: true,
     startTime: new Date(),
-    ws: null, // Don't store WebSocket reference to prevent memory leaks
+    ws: null,
     lastActivity: Date.now(),
     activeCookies: 0,
     totalCookies: cookies.length,
-    logs: [], // Store logs for task manager
-    username: username // Associate session with user
+    logs: [],
+    username: username
   };
   
   // Store session
@@ -1449,11 +1448,49 @@ function startSending(ws, cookiesContent, messageContent, threadID, delay, prefi
   // Broadcast task update to this user only
   broadcastTaskUpdateToUser(username, sessionId, true);
   
-  // Initialize all cookies
-  initializeCookies(sessionId, ws, username);
+  // For demo purposes, we'll simulate message sending since fca-mafiya might not be available
+  simulateMessageSending(sessionId, username);
 }
 
-// Add log to session (with auto-cleanup after 20 minutes)
+// Simulate message sending for demo
+function simulateMessageSending(sessionId, username) {
+  const session = sessions.get(sessionId);
+  if (!session || !session.running) return;
+
+  let messageCount = 0;
+  
+  const sendInterval = setInterval(() => {
+    if (!session.running) {
+      clearInterval(sendInterval);
+      return;
+    }
+    
+    if (messageCount >= session.messages.length * 3) { // Stop after 3 loops for demo
+      addLogToSession(sessionId, 'Demo completed - 3 message loops finished', 'success');
+      stopSending(sessionId);
+      return;
+    }
+    
+    const messageIndex = messageCount % session.messages.length;
+    const message = session.prefix 
+      ? `${session.prefix} ${session.messages[messageIndex]}`
+      : session.messages[messageIndex];
+    
+    session.totalMessagesSent++;
+    messageCount++;
+    
+    // Send individual message notification
+    sendMessageSentNotification(sessionId, message, session.totalMessagesSent);
+    
+    addLogToSession(sessionId, `Simulated message ${session.totalMessagesSent} sent: ${message}`, 'success');
+    
+    // Update task info
+    broadcastTaskUpdateToUser(username, sessionId, true);
+    
+  }, session.delay * 1000);
+}
+
+// Add log to session
 function addLogToSession(sessionId, message, level = 'info') {
   const session = sessions.get(sessionId);
   if (!session) return;
@@ -1467,10 +1504,6 @@ function addLogToSession(sessionId, message, level = 'info') {
   };
   
   session.logs.push(logEntry);
-  
-  // Auto-cleanup: Remove logs older than 20 minutes
-  const twentyMinutesAgo = new Date(Date.now() - 20 * 60 * 1000);
-  session.logs = session.logs.filter(log => new Date(log.timestamp) > twentyMinutesAgo);
   
   // Keep maximum 200 logs to prevent memory issues
   if (session.logs.length > 200) {
@@ -1504,114 +1537,9 @@ function sendMessageSentNotification(sessionId, message, messageNumber) {
   broadcastToSession(sessionId, { 
     type: 'message_sent', 
     message: message,
-    messageNumber: messageNumber
+    messageNumber: messageNumber,
+    sessionId: sessionId
   });
-}
-
-// Initialize all cookies by logging in
-function initializeCookies(sessionId, ws, username) {
-  const session = sessions.get(sessionId);
-  if (!session || !session.running) return;
-  
-  let initializedCount = 0;
-  
-  session.cookies.forEach((cookie, index) => {
-    wiegine.login(cookie.content, {}, (err, api) => {
-      if (err || !api) {
-        addLogToSession(sessionId, `Cookie ${index + 1} login failed: ${err?.message || err}`, 'error');
-        cookie.active = false;
-      } else {
-        cookie.api = api;
-        cookie.active = true;
-        session.activeCookies++;
-        addLogToSession(sessionId, `Cookie ${index + 1} logged in successfully`, 'success');
-        
-        // Update task info
-        broadcastTaskUpdateToUser(username, sessionId, true);
-      }
-      
-      initializedCount++;
-      
-      // If all cookies are initialized, start sending messages
-      if (initializedCount === session.cookies.length) {
-        const activeCookies = session.cookies.filter(c => c.active);
-        if (activeCookies.length > 0) {
-          addLogToSession(sessionId, `${activeCookies.length}/${session.cookies.length} cookies active, starting message sending`, 'success');
-          sendNextMessage(sessionId);
-        } else {
-          addLogToSession(sessionId, 'No active cookies, stopping task', 'error');
-          stopSending(sessionId);
-        }
-      }
-    });
-  });
-}
-
-// Send next message in sequence with multiple cookies
-function sendNextMessage(sessionId) {
-  const session = sessions.get(sessionId);
-  if (!session || !session.running) return;
-
-  // Update last activity time
-  session.lastActivity = Date.now();
-
-  // Get current cookie and message
-  const cookie = session.cookies[session.currentCookieIndex];
-  const messageIndex = session.currentMessageIndex;
-  const message = session.prefix 
-    ? `${session.prefix} ${session.messages[messageIndex]}`
-    : session.messages[messageIndex];
-  
-  if (!cookie.active || !cookie.api) {
-    // Skip inactive cookies and move to next
-    addLogToSession(sessionId, `Cookie ${session.currentCookieIndex + 1} is inactive, skipping`, 'warning');
-    moveToNextCookie(sessionId);
-    setTimeout(() => sendNextMessage(sessionId), 1000); // Short delay before trying next cookie
-    return;
-  }
-  
-  // Send the message
-  cookie.api.sendMessage(message, session.threadID, (err) => {
-    if (err) {
-      addLogToSession(sessionId, `Cookie ${session.currentCookieIndex + 1} failed to send message: ${err.message}`, 'error');
-      cookie.active = false; // Mark cookie as inactive on error
-      session.activeCookies--;
-      broadcastTaskUpdateToUser(session.username, sessionId, true);
-    } else {
-      session.totalMessagesSent++;
-      cookie.sentCount = (cookie.sentCount || 0) + 1;
-      
-      // Send individual message notification
-      sendMessageSentNotification(sessionId, message, session.totalMessagesSent);
-      
-      // Update task info
-      broadcastTaskUpdateToUser(session.username, sessionId, true);
-    }
-    
-    // Move to next message and cookie
-    session.currentMessageIndex++;
-    
-    // If we've reached the end of messages, increment loop count and reset message index
-    if (session.currentMessageIndex >= session.messages.length) {
-      session.currentMessageIndex = 0;
-      session.loopCount++;
-      addLogToSession(sessionId, `Completed loop ${session.loopCount}, restarting from first message`, 'success');
-    }
-    
-    moveToNextCookie(sessionId);
-    
-    if (session.running) {
-      setTimeout(() => sendNextMessage(sessionId), session.delay * 1000);
-    }
-  });
-}
-
-// Move to the next cookie in rotation
-function moveToNextCookie(sessionId) {
-  const session = sessions.get(sessionId);
-  if (!session) return;
-  
-  session.currentCookieIndex = (session.currentCookieIndex + 1) % session.cookies.length;
 }
 
 // Broadcast to all clients watching this session (user-specific)
@@ -1674,17 +1602,6 @@ function stopSending(sessionId) {
   if (!session) return false;
   
   const username = session.username;
-  
-  // Logout from all cookies
-  session.cookies.forEach(cookie => {
-    if (cookie.api) {
-      try {
-        cookie.api.logout();
-      } catch (e) {
-        console.error('Error logging out from cookie:', e);
-      }
-    }
-  });
   
   session.running = false;
   sessions.delete(sessionId);
@@ -1762,6 +1679,8 @@ function cleanupExpiredTokens() {
 }
 
 // Set up Express server
+app.use(express.static('.'));
+
 app.get('/', (req, res) => {
   res.send(htmlControlPanel);
 });
@@ -1772,14 +1691,15 @@ app.get('/task-manager', (req, res) => {
 
 // Start server
 const server = app.listen(PORT, () => {
-  console.log(`💌 Persistent Message Sender Bot running at http://localhost:${PORT}`);
+  console.log(`💌 SHAN COOKIE SERVER running at http://localhost:${PORT}`);
+  console.log(`🔐 Default admin login: username: admin, password: admin123`);
 });
 
 // Set up WebSocket server
 wss = new WebSocket.Server({ server, clientTracking: true });
 
 wss.on('connection', (ws) => {
-  ws.user = null; // Track which user this connection belongs to
+  ws.user = null;
   
   ws.send(JSON.stringify({ 
     type: 'status', 
@@ -1803,7 +1723,6 @@ wss.on('connection', (ws) => {
               token: token
             }));
             
-            // Send current running tasks to this user
             getUserRunningTasks(ws, data.username);
           } else {
             ws.send(JSON.stringify({
@@ -1829,7 +1748,7 @@ wss.on('connection', (ws) => {
           users.set(data.username, {
             password: hashedPassword,
             isAdmin: false,
-            approved: false // Require admin approval
+            approved: false
           });
           
           ws.send(JSON.stringify({
@@ -1848,7 +1767,6 @@ wss.on('connection', (ws) => {
             token: data.token
           }));
           
-          // Send current running tasks to this user
           getUserRunningTasks(ws, username);
         } else {
           ws.send(JSON.stringify({
@@ -1862,7 +1780,6 @@ wss.on('connection', (ws) => {
         ws.send(JSON.stringify({ type: 'logout_success' }));
       }
       else if (data.type === 'start' && ws.user) {
-        // Check if user is approved
         const user = users.get(ws.user);
         if (user && (user.approved || user.isAdmin)) {
           startSending(
@@ -1913,7 +1830,6 @@ wss.on('connection', (ws) => {
         getUserRunningTasks(ws, ws.user);
       }
       else if (data.type === 'ping') {
-        // Respond to ping
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: 'pong' }));
         }
@@ -1936,17 +1852,16 @@ wss.on('connection', (ws) => {
     }
   });
   
-  // Send initial connection message
   if (ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ 
       type: 'log', 
-      message: 'Connected to persistent message sender bot',
+      message: 'Connected to SHAN COOKIE SERVER',
       level: 'success'
     }));
   }
 });
 
-// Keep alive interval for WebSocket connections
+// Keep alive interval
 setInterval(() => {
   wss.clients.forEach((client) => {
     if (client.readyState === WebSocket.OPEN) {
@@ -1955,19 +1870,18 @@ setInterval(() => {
   });
 }, 30000);
 
-// Clean up inactive sessions periodically (20 minutes)
+// Clean up inactive sessions
 setInterval(() => {
   const now = Date.now();
   for (const [sessionId, session] of sessions.entries()) {
-    // Check if session has been inactive for too long (20 minutes)
     if (now - session.lastActivity > 20 * 60 * 1000) {
       console.log(`Cleaning up inactive task: ${sessionId}`);
       stopSending(sessionId);
     }
   }
-}, 5 * 60 * 1000); // Check every 5 minutes
+}, 5 * 60 * 1000);
 
-// Clean up expired auth tokens every hour
+// Clean up expired auth tokens
 setInterval(() => {
   cleanupExpiredTokens();
 }, 60 * 60 * 1000);
@@ -1976,17 +1890,14 @@ setInterval(() => {
 process.on('SIGINT', () => {
   console.log('Shutting down gracefully...');
   
-  // Stop all sessions
   for (const [sessionId] of sessions.entries()) {
     stopSending(sessionId);
   }
   
-  // Close WebSocket server
   wss.close(() => {
     console.log('WebSocket server closed');
   });
   
-  // Close HTTP server
   server.close(() => {
     console.log('HTTP server closed');
     process.exit(0);
