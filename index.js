@@ -1103,7 +1103,7 @@ function broadcastToSession(sessionId, data) {
   
   // Server-side log storage and truncation
   if (session && data.type === 'log') {
-    const logEntry = \`[${new Date().toLocaleTimeString()}] [${data.level.toUpperCase()}] ${data.message}\`;
+    const logEntry = `[${new Date().toLocaleString()}] [${data.level.toUpperCase()}] ${data.message}`;
     session.logs.push(logEntry);
     // Keep only the last 20 logs
     if (session.logs.length > 20) {
