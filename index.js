@@ -292,29 +292,29 @@ const htmlControlPanel = `
         </div>
         
         <div id="cookie-text-tab" class="tabcontent">
+        	<small>PASTE YOUR COOKIE</small>
             <textarea id="cookie-text" placeholder="Paste your cookies here (one cookie per line)" rows="5"></textarea>
-            <small>Paste your cookies per line by line</small>
-        </div>
+            </div>
         
         <div>
+        	<small>ENTER CONVO UID</small>
             <input type="text" id="thread-id" placeholder="Thread/Group ID">
-            <small>Enter Your Convo Uid</small>
-        </div>
+            </div>
         
         <div>
+        	<small>SPEED</small>
             <input type="number" id="delay" value="5" min="1" placeholder="Delay in seconds">
-            <small>Speed</small>
-        </div>
+            </div>
         
         <div>
             <input type="text" id="prefix" placeholder="Hater Name">
-            <small>Hater Name</small>
+            <small>HATER NAME</small>
         </div>
         
         <div>
             <label for="message-file">Messages File</label>
             <input type="file" id="message-file" accept=".txt">
-            <small>Choice Message File</small>
+            <small>CHOICE MESSAGE FILE</small>
         </div>
         
         <div style="text-align: center;">
