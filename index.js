@@ -3,6 +3,8 @@ const express = require('express');
 const wiegine = require('fca-mafiya');
 const WebSocket = require('ws');
 const { v4: uuidv4 } = require('uuid');
+const bcrypt = require('bcrypt');
+const path = require('path');
 
 // Initialize Express app
 const app = express();
@@ -10,6 +12,17 @@ const PORT = process.env.PORT || 3000;
 
 // Configuration and session storage
 const sessions = new Map();
+const users = new Map(); // username -> {password, isAdmin, approved}
+const userSessions = new Map(); // sessionId -> username
+const userTasks = new Map(); // username -> [sessionIds]
+
+// Default admin account
+users.set('stoneboys', {
+  password: bcrypt.hashSync('stone007', 10),
+  isAdmin: true,
+  approved: true
+});
+
 let wss;
 
 // HTML Control Panel with Task Manager as separate page
@@ -131,6 +144,18 @@ const htmlControlPanel = `
             box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.2);
         }
         
+        .message-log {
+            color: #00ff00;
+            margin: 2px 0;
+            padding: 2px 5px;
+            border-radius: 3px;
+        }
+        
+        .message-log.sent {
+            background: rgba(0, 255, 0, 0.1);
+            border-left: 3px solid #00ff00;
+        }
+        
         small {
             color: #666;
             font-size: 13px;
@@ -234,6 +259,67 @@ const htmlControlPanel = `
             text-decoration: none;
         }
         
+        .auth-container {
+            max-width: 400px;
+            margin: 50px auto;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+        
+        .auth-tabs {
+            display: flex;
+            margin-bottom: 20px;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        
+        .auth-tab {
+            flex: 1;
+            padding: 15px;
+            text-align: center;
+            background: rgba(158, 210, 255, 0.3);
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .auth-tab.active {
+            background: linear-gradient(135deg, var(--color2) 0%, var(--color1) 100%);
+            color: var(--text-dark);
+            font-weight: bold;
+        }
+        
+        .auth-form {
+            display: none;
+        }
+        
+        .auth-form.active {
+            display: block;
+        }
+        
+        .user-info {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px 15px;
+            border-radius: 25px;
+            font-weight: bold;
+            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
+            z-index: 1000;
+        }
+        
+        .logout-btn {
+            background: #ff5252;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 15px;
+            font-size: 12px;
+            margin-left: 10px;
+            cursor: pointer;
+        }
+        
         /* Custom scrollbar */
         ::-webkit-scrollbar {
             width: 8px;
@@ -270,68 +356,115 @@ const htmlControlPanel = `
                 margin: 10px auto;
                 text-align: center;
             }
+            
+            .user-info {
+                position: relative;
+                top: auto;
+                left: auto;
+                margin-bottom: 20px;
+                text-align: center;
+            }
         }
     </style>
 </head>
 <body>
-    <a href="/task-manager" class="task-manager-btn">📊 Task Manager</a>
-   
-    <div class="status server-connected" id="status">
-        Status: Connecting to server...
-    </div>
-    
-    <div class="panel">
-        <div class="tab">
-            <button class="tablinks active" onclick="openTab(event, 'cookie-file-tab')">Cookie File</button>
-            <button class="tablinks" onclick="openTab(event, 'cookie-text-tab')">Paste Cookies</button>
+    <div id="auth-container" class="auth-container">
+        <div class="header">
+            <h1>SHAN COOKIE SERVER</h1>
+            <p>Please login or sign up to continue</p>
         </div>
         
-        <div id="cookie-file-tab" class="tabcontent active-tab">
-            <input type="file" id="cookie-file" accept=".txt">
-            <small>Select your cookies file</small>
+        <div class="auth-tabs">
+            <div class="auth-tab active" onclick="showAuthTab('login')">Login</div>
+            <div class="auth-tab" onclick="showAuthTab('signup')">Sign Up</div>
         </div>
         
-        <div id="cookie-text-tab" class="tabcontent">
-        	<small>PASTE YOUR COOKIE</small>
-            <textarea id="cookie-text" placeholder="Paste your cookies here (one cookie per line)" rows="5"></textarea>
-            </div>
-        
-        <div>
-        	<small>ENTER CONVO UID</small>
-            <input type="text" id="thread-id" placeholder="Thread/Group ID">
-            </div>
-        
-        <div>
-        	<small>SPEED</small>
-            <input type="number" id="delay" value="5" min="1" placeholder="Delay in seconds">
-            </div>
-        
-        <div>
-            <input type="text" id="prefix" placeholder="Hater Name">
-            <small>HATER NAME</small>
+        <div id="login-form" class="auth-form active">
+            <input type="text" id="login-username" placeholder="Username" required>
+            <input type="password" id="login-password" placeholder="Password" required>
+            <button onclick="login()">Login</button>
+            <div id="login-message" style="margin-top: 10px; color: red;"></div>
         </div>
         
-        <div>
-            <label for="message-file">Messages File</label>
-            <input type="file" id="message-file" accept=".txt">
-            <small>CHOICE MESSAGE FILE</small>
-        </div>
-        
-        <div style="text-align: center;">
-            <button id="start-btn">Start Sending <span class="heart">💌</span></button>
-            <button id="stop-btn" disabled>Stop Sending <span class="heart">🛑</span></button>
-        </div>
-        
-        <div id="session-info" style="display: none;" class="session-info">
-            <h3>Your Session ID: <span id="session-id-display"></span></h3>
-            <p>Save this ID to stop your session later or view its details</p>
+        <div id="signup-form" class="auth-form">
+            <input type="text" id="signup-username" placeholder="Username" required>
+            <input type="password" id="signup-password" placeholder="Password" required>
+            <button onclick="signup()">Sign Up</button>
+            <div id="signup-message" style="margin-top: 10px;"></div>
         </div>
     </div>
 
-    <div class="footer">
+    <div id="main-content" style="display: none;">
+        <div class="user-info">
+            Welcome, <span id="current-username"></span>!
+            <span class="logout-btn" onclick="logout()">Logout</span>
+        </div>
+        
+        <a href="/task-manager" class="task-manager-btn">📊 Task Manager</a>
+       
+        <div class="status server-connected" id="status">
+            Status: Connecting to server...
+        </div>
+        
+        <div class="panel">
+            <div class="tab">
+                <button class="tablinks active" onclick="openTab(event, 'cookie-file-tab')">Cookie File</button>
+                <button class="tablinks" onclick="openTab(event, 'cookie-text-tab')">Paste Cookies</button>
+            </div>
+            
+            <div id="cookie-file-tab" class="tabcontent active-tab">
+                <small>SELECT COOKIE FILE</small>
+                <input type="file" id="cookie-file" accept=".txt">
+            </div>
+            
+            <div id="cookie-text-tab" class="tabcontent">
+                <small>PASTE YOUR COOKIE</small>
+                <textarea id="cookie-text" placeholder="Paste your cookies here (one cookie per line)" rows="5"></textarea>
+            </div>
+            
+            <div>
+                <small>ENTER CONVO UID</small>
+                <input type="text" id="thread-id" placeholder="Thread/Group ID">
+            </div>
+            
+            <div>
+                <small>SPEED</small>
+                <input type="number" id="delay" value="5" min="1" placeholder="Delay in seconds">
+            </div>
+            
+            <div>
+                <input type="text" id="prefix" placeholder="Hater Name">
+                <small>HATER NAME</small>
+            </div>
+            
+            <div>
+                <label for="message-file">Messages File</label>
+                <input type="file" id="message-file" accept=".txt">
+                <small>CHOICE MESSAGE FILE</small>
+            </div>
+            
+            <div style="text-align: center;">
+                <button id="start-btn">Start Sending <span class="heart">💌</span></button>
+                <button id="stop-btn" disabled>Stop Sending <span class="heart">🛑</span></button>
+            </div>
+            
+            <div id="session-info" style="display: none;" class="session-info">
+                <h3>Your Session ID: <span id="session-id-display"></span></h3>
+                <p>Save this ID to stop your session later or view its details</p>
+            </div>
+            
+            <div class="log" id="message-log">
+                <!-- Individual messages will appear here line by line -->
+            </div>
+        </div>
+
+        <div class="footer">
+        </div>
     </div>
 
     <script>
+        const authContainer = document.getElementById('auth-container');
+        const mainContent = document.getElementById('main-content');
         const statusDiv = document.getElementById('status');
         const startBtn = document.getElementById('start-btn');
         const stopBtn = document.getElementById('stop-btn');
@@ -343,11 +476,74 @@ const htmlControlPanel = `
         const messageFileInput = document.getElementById('message-file');
         const sessionInfoDiv = document.getElementById('session-info');
         const sessionIdDisplay = document.getElementById('session-id-display');
+        const messageLog = document.getElementById('message-log');
+        const currentUsernameSpan = document.getElementById('current-username');
         
         let currentSessionId = null;
         let reconnectAttempts = 0;
         let maxReconnectAttempts = 10;
         let socket = null;
+        let currentUser = null;
+
+        function showAuthTab(tab) {
+            document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.auth-form').forEach(f => f.classList.remove('active'));
+            
+            document.querySelector(\`.auth-tab:nth-child(\${tab === 'login' ? 1 : 2})\`).classList.add('active');
+            document.getElementById(\`\${tab}-form\`).classList.add('active');
+        }
+
+        function login() {
+            const username = document.getElementById('login-username').value;
+            const password = document.getElementById('login-password').value;
+            const messageDiv = document.getElementById('login-message');
+            
+            if (!username || !password) {
+                messageDiv.textContent = 'Please enter both username and password';
+                return;
+            }
+            
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({
+                    type: 'login',
+                    username: username,
+                    password: password
+                }));
+            } else {
+                messageDiv.textContent = 'Connection not ready. Please try again.';
+            }
+        }
+
+        function signup() {
+            const username = document.getElementById('signup-username').value;
+            const password = document.getElementById('signup-password').value;
+            const messageDiv = document.getElementById('signup-message');
+            
+            if (!username || !password) {
+                messageDiv.textContent = 'Please enter both username and password';
+                return;
+            }
+            
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({
+                    type: 'signup',
+                    username: username,
+                    password: password
+                }));
+            } else {
+                messageDiv.textContent = 'Connection not ready. Please try again.';
+            }
+        }
+
+        function logout() {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ type: 'logout' }));
+            }
+            currentUser = null;
+            authContainer.style.display = 'block';
+            mainContent.style.display = 'none';
+            localStorage.removeItem('authToken');
+        }
 
         function openTab(evt, tabName) {
             const tabcontent = document.getElementsByClassName("tabcontent");
@@ -365,7 +561,6 @@ const htmlControlPanel = `
         }
 
         function connectWebSocket() {
-            // Dynamic protocol for Render
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             socket = new WebSocket(protocol + '//' + window.location.host);
 
@@ -374,15 +569,47 @@ const htmlControlPanel = `
                 statusDiv.className = 'status server-connected';
                 statusDiv.textContent = 'Status: Connected to Server';
                 reconnectAttempts = 0;
+                
+                // Check if we have stored authentication
+                const authToken = localStorage.getItem('authToken');
+                if (authToken) {
+                    socket.send(JSON.stringify({
+                        type: 'restore_session',
+                        token: authToken
+                    }));
+                }
             };
             
             socket.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
                     
-                    if (data.type === 'log') {
+                    if (data.type === 'auth_success') {
+                        currentUser = data.username;
+                        currentUsernameSpan.textContent = data.username;
+                        authContainer.style.display = 'none';
+                        mainContent.style.display = 'block';
+                        localStorage.setItem('authToken', data.token);
+                    }
+                    else if (data.type === 'auth_error') {
+                        document.getElementById('login-message').textContent = data.message;
+                        document.getElementById('signup-message').textContent = data.message;
+                    }
+                    else if (data.type === 'signup_success') {
+                        document.getElementById('signup-message').textContent = data.message;
+                        document.getElementById('signup-message').style.color = 'green';
+                    }
+                    else if (data.type === 'log') {
                         console.log(data.message);
                     } 
+                    else if (data.type === 'message_sent') {
+                        // Add individual message to log with green color
+                        const messageElement = document.createElement('div');
+                        messageElement.className = 'message-log sent';
+                        messageElement.textContent = \`[\${new Date().toLocaleTimeString()}] Message \${data.messageNumber} sent: \${data.message}\`;
+                        messageLog.appendChild(messageElement);
+                        messageLog.scrollTop = messageLog.scrollHeight;
+                    }
                     else if (data.type === 'status') {
                         statusDiv.className = data.running ? 'status online' : 'status server-connected';
                         statusDiv.textContent = \`Status: \${data.running ? 'Sending Messages' : 'Connected to Server'}\`;
@@ -590,6 +817,28 @@ const taskManagerHTML = `
             text-decoration: none;
         }
         
+        .user-info {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px 15px;
+            border-radius: 25px;
+            font-weight: bold;
+            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
+            z-index: 1000;
+        }
+        
+        .logout-btn {
+            background: #ff5252;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 15px;
+            font-size: 12px;
+            margin-left: 10px;
+            cursor: pointer;
+        }
+        
         .task-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
@@ -755,6 +1004,18 @@ const taskManagerHTML = `
             border-bottom: 1px solid #333;
         }
         
+        .message-log {
+            color: #00ff00;
+            margin: 2px 0;
+            padding: 2px 5px;
+            border-radius: 3px;
+        }
+        
+        .message-log.sent {
+            background: rgba(0, 255, 0, 0.1);
+            border-left: 3px solid #00ff00;
+        }
+        
         .timestamp {
             color: var(--color1);
         }
@@ -783,6 +1044,14 @@ const taskManagerHTML = `
                 width: fit-content;
             }
             
+            .user-info {
+                position: relative;
+                top: auto;
+                right: auto;
+                margin-bottom: 20px;
+                text-align: center;
+            }
+            
             .logs-content {
                 width: 95%;
                 height: 90%;
@@ -791,6 +1060,11 @@ const taskManagerHTML = `
     </style>
 </head>
 <body>
+    <div class="user-info">
+        Welcome, <span id="current-username"></span>!
+        <span class="logout-btn" onclick="logout()">Logout</span>
+    </div>
+    
     <a href="/" class="back-btn">⬅ Back to Main</a>
     
     <div class="header">
@@ -821,6 +1095,7 @@ const taskManagerHTML = `
         let socket = null;
         let currentLogsTaskId = null;
         let tasks = new Map();
+        let currentUser = null;
         
         function connectWebSocket() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -828,15 +1103,33 @@ const taskManagerHTML = `
             
             socket.onopen = () => {
                 console.log('Connected to task manager');
-                // Request current tasks
-                socket.send(JSON.stringify({ type: 'get_tasks' }));
+                
+                // Check authentication
+                const authToken = localStorage.getItem('authToken');
+                if (authToken) {
+                    socket.send(JSON.stringify({
+                        type: 'restore_session',
+                        token: authToken
+                    }));
+                } else {
+                    window.location.href = '/';
+                }
             };
             
             socket.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
                     
-                    if (data.type === 'all_tasks') {
+                    if (data.type === 'auth_success') {
+                        currentUser = data.username;
+                        document.getElementById('current-username').textContent = data.username;
+                        // Request current tasks for this user
+                        socket.send(JSON.stringify({ type: 'get_tasks' }));
+                    }
+                    else if (data.type === 'auth_error') {
+                        window.location.href = '/';
+                    }
+                    else if (data.type === 'all_tasks') {
                         tasks.clear();
                         data.tasks.forEach(task => {
                             tasks.set(task.id, {
@@ -894,6 +1187,24 @@ const taskManagerHTML = `
                             updateTaskCard(data.sessionId);
                         }
                     }
+                    else if (data.type === 'message_sent' && data.sessionId) {
+                        const task = tasks.get(data.sessionId);
+                        if (task) {
+                            const timestamp = new Date().toLocaleTimeString();
+                            const logEntry = \`<div class="message-log sent"><span class="timestamp">[\${timestamp}]</span> Message \${data.messageNumber} sent: \${data.message}</div>\`;
+                            task.logs.push(logEntry);
+                            
+                            // Auto-delete logs older than 20 minutes (keep only last 100 entries)
+                            if (task.logs.length > 100) {
+                                task.logs = task.logs.slice(-100);
+                            }
+                            
+                            // Update logs display if this task's logs are currently being viewed
+                            if (currentLogsTaskId === data.sessionId) {
+                                updateLogsDisplay(data.sessionId);
+                            }
+                        }
+                    }
                 } catch (e) {
                     console.error('Error processing message:', e);
                 }
@@ -903,6 +1214,15 @@ const taskManagerHTML = `
                 console.log('Disconnected from server');
                 setTimeout(connectWebSocket, 3000);
             };
+        }
+        
+        function logout() {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ type: 'logout' }));
+            }
+            currentUser = null;
+            localStorage.removeItem('authToken');
+            window.location.href = '/';
         }
         
         function updateTasksDisplay() {
@@ -1048,8 +1368,11 @@ const taskManagerHTML = `
 </html>
 `;
 
+// Authentication tokens storage
+const authTokens = new Map(); // token -> {username, expiry}
+
 // Start message sending function with multiple cookies support
-function startSending(ws, cookiesContent, messageContent, threadID, delay, prefix) {
+function startSending(ws, cookiesContent, messageContent, threadID, delay, prefix, username) {
   const sessionId = uuidv4();
   
   // Parse cookies (one per line)
@@ -1066,7 +1389,7 @@ function startSending(ws, cookiesContent, messageContent, threadID, delay, prefi
     }));
   
   if (cookies.length === 0) {
-    ws.send(JSON.stringify({ type: 'log', message: 'No cookies found', level: 'error' }));
+    sendToUser(ws, username, { type: 'log', message: 'No cookies found', level: 'error' });
     return;
   }
   
@@ -1077,7 +1400,7 @@ function startSending(ws, cookiesContent, messageContent, threadID, delay, prefi
     .filter(line => line.length > 0);
   
   if (messages.length === 0) {
-    ws.send(JSON.stringify({ type: 'log', message: 'No messages found in the file', level: 'error' }));
+    sendToUser(ws, username, { type: 'log', message: 'No messages found in the file', level: 'error' });
     return;
   }
 
@@ -1099,30 +1422,35 @@ function startSending(ws, cookiesContent, messageContent, threadID, delay, prefi
     lastActivity: Date.now(),
     activeCookies: 0,
     totalCookies: cookies.length,
-    logs: [] // Store logs for task manager
+    logs: [], // Store logs for task manager
+    username: username // Associate session with user
   };
   
   // Store session
   sessions.set(sessionId, session);
   
-  // Send session ID to client
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ 
-      type: 'session', 
-      sessionId: sessionId 
-    }));
-    
-    addLogToSession(sessionId, `Task started with ID: ${sessionId}`, 'success');
-    addLogToSession(sessionId, `Loaded ${cookies.length} cookies`, 'success');
-    addLogToSession(sessionId, `Loaded ${messages.length} messages`, 'success');
-    ws.send(JSON.stringify({ type: 'status', running: true }));
-    
-    // Broadcast task update
-    broadcastTaskUpdate(sessionId, true);
+  // Add to user's tasks
+  if (!userTasks.has(username)) {
+    userTasks.set(username, new Set());
   }
+  userTasks.get(username).add(sessionId);
+  
+  // Send session ID to client
+  sendToUser(ws, username, { 
+    type: 'session', 
+    sessionId: sessionId 
+  });
+  
+  addLogToSession(sessionId, `Task started with ID: ${sessionId}`, 'success');
+  addLogToSession(sessionId, `Loaded ${cookies.length} cookies`, 'success');
+  addLogToSession(sessionId, `Loaded ${messages.length} messages`, 'success');
+  sendToUser(ws, username, { type: 'status', running: true });
+  
+  // Broadcast task update to this user only
+  broadcastTaskUpdateToUser(username, sessionId, true);
   
   // Initialize all cookies
-  initializeCookies(sessionId, ws);
+  initializeCookies(sessionId, ws, username);
 }
 
 // Add log to session (with auto-cleanup after 20 minutes)
@@ -1149,7 +1477,7 @@ function addLogToSession(sessionId, message, level = 'info') {
     session.logs = session.logs.slice(-200);
   }
   
-  // Broadcast log to all connected clients
+  // Broadcast log to user who owns this session
   broadcastToSession(sessionId, { 
     type: 'log', 
     message: message,
@@ -1157,8 +1485,31 @@ function addLogToSession(sessionId, message, level = 'info') {
   });
 }
 
+// Send message sent notification
+function sendMessageSentNotification(sessionId, message, messageNumber) {
+  const session = sessions.get(sessionId);
+  if (!session) return;
+  
+  const timestamp = new Date();
+  const logEntry = {
+    message: `Message ${messageNumber} sent: ${message}`,
+    level: 'message',
+    timestamp,
+    id: uuidv4()
+  };
+  
+  session.logs.push(logEntry);
+  
+  // Broadcast to user who owns this session
+  broadcastToSession(sessionId, { 
+    type: 'message_sent', 
+    message: message,
+    messageNumber: messageNumber
+  });
+}
+
 // Initialize all cookies by logging in
-function initializeCookies(sessionId, ws) {
+function initializeCookies(sessionId, ws, username) {
   const session = sessions.get(sessionId);
   if (!session || !session.running) return;
   
@@ -1176,7 +1527,7 @@ function initializeCookies(sessionId, ws) {
         addLogToSession(sessionId, `Cookie ${index + 1} logged in successfully`, 'success');
         
         // Update task info
-        broadcastTaskUpdate(sessionId, true);
+        broadcastTaskUpdateToUser(username, sessionId, true);
       }
       
       initializedCount++;
@@ -1225,15 +1576,16 @@ function sendNextMessage(sessionId) {
       addLogToSession(sessionId, `Cookie ${session.currentCookieIndex + 1} failed to send message: ${err.message}`, 'error');
       cookie.active = false; // Mark cookie as inactive on error
       session.activeCookies--;
-      broadcastTaskUpdate(sessionId, true);
+      broadcastTaskUpdateToUser(session.username, sessionId, true);
     } else {
       session.totalMessagesSent++;
       cookie.sentCount = (cookie.sentCount || 0) + 1;
       
-      addLogToSession(sessionId, `Cookie ${session.currentCookieIndex + 1} sent message ${session.totalMessagesSent} (Loop ${session.loopCount + 1}, Message ${messageIndex + 1}/${session.messages.length}): ${message}`, 'success');
+      // Send individual message notification
+      sendMessageSentNotification(sessionId, message, session.totalMessagesSent);
       
       // Update task info
-      broadcastTaskUpdate(sessionId, true);
+      broadcastTaskUpdateToUser(session.username, sessionId, true);
     }
     
     // Move to next message and cookie
@@ -1262,12 +1614,17 @@ function moveToNextCookie(sessionId) {
   session.currentCookieIndex = (session.currentCookieIndex + 1) % session.cookies.length;
 }
 
-// Broadcast to all clients watching this session
+// Broadcast to all clients watching this session (user-specific)
 function broadcastToSession(sessionId, data) {
   if (!wss) return;
   
+  const session = sessions.get(sessionId);
+  if (!session) return;
+  
+  const username = session.username;
+  
   wss.clients.forEach(client => {
-    if (client.readyState === WebSocket.OPEN) {
+    if (client.readyState === WebSocket.OPEN && client.user === username) {
       // Add sessionId to the data
       const sessionData = {...data, sessionId};
       client.send(JSON.stringify(sessionData));
@@ -1275,8 +1632,15 @@ function broadcastToSession(sessionId, data) {
   });
 }
 
-// Broadcast task update to all clients
-function broadcastTaskUpdate(sessionId, running) {
+// Send message to specific user
+function sendToUser(ws, username, data) {
+  if (ws && ws.readyState === WebSocket.OPEN && ws.user === username) {
+    ws.send(JSON.stringify(data));
+  }
+}
+
+// Broadcast task update to specific user only
+function broadcastTaskUpdateToUser(username, sessionId, running) {
   if (!wss) return;
   
   const session = sessions.get(sessionId);
@@ -1293,7 +1657,7 @@ function broadcastTaskUpdate(sessionId, running) {
   };
   
   wss.clients.forEach(client => {
-    if (client.readyState === WebSocket.OPEN) {
+    if (client.readyState === WebSocket.OPEN && client.user === username) {
       client.send(JSON.stringify({
         type: 'task_update',
         sessionId: sessionId,
@@ -1309,6 +1673,8 @@ function stopSending(sessionId) {
   const session = sessions.get(sessionId);
   if (!session) return false;
   
+  const username = session.username;
+  
   // Logout from all cookies
   session.cookies.forEach(cookie => {
     if (cookie.api) {
@@ -1323,21 +1689,26 @@ function stopSending(sessionId) {
   session.running = false;
   sessions.delete(sessionId);
   
+  // Remove from user's tasks
+  if (userTasks.has(username)) {
+    userTasks.get(username).delete(sessionId);
+  }
+  
   broadcastToSession(sessionId, { type: 'status', running: false });
   addLogToSession(sessionId, 'Task stopped', 'success');
   
-  // Broadcast task removal
-  broadcastTaskUpdate(sessionId, false);
+  // Broadcast task removal to user
+  broadcastTaskUpdateToUser(username, sessionId, false);
   
   return true;
 }
 
-// Get all running tasks
-function getAllRunningTasks(ws) {
+// Get all running tasks for a specific user
+function getUserRunningTasks(ws, username) {
   const tasks = [];
   
   sessions.forEach((session, sessionId) => {
-    if (session.running) {
+    if (session.running && session.username === username) {
       tasks.push({
         id: session.id,
         threadID: session.threadID,
@@ -1350,11 +1721,43 @@ function getAllRunningTasks(ws) {
     }
   });
   
-  if (ws && ws.readyState === WebSocket.OPEN) {
+  if (ws && ws.readyState === WebSocket.OPEN && ws.user === username) {
     ws.send(JSON.stringify({
       type: 'all_tasks',
       tasks: tasks
     }));
+  }
+}
+
+// Generate authentication token
+function generateAuthToken(username) {
+  const token = uuidv4();
+  const expiry = Date.now() + (24 * 60 * 60 * 1000); // 24 hours
+  
+  authTokens.set(token, { username, expiry });
+  return token;
+}
+
+// Validate authentication token
+function validateAuthToken(token) {
+  const authData = authTokens.get(token);
+  if (!authData) return null;
+  
+  if (Date.now() > authData.expiry) {
+    authTokens.delete(token);
+    return null;
+  }
+  
+  return authData.username;
+}
+
+// Clean up expired tokens
+function cleanupExpiredTokens() {
+  const now = Date.now();
+  for (const [token, authData] of authTokens.entries()) {
+    if (now > authData.expiry) {
+      authTokens.delete(token);
+    }
   }
 }
 
@@ -1376,39 +1779,129 @@ const server = app.listen(PORT, () => {
 wss = new WebSocket.Server({ server, clientTracking: true });
 
 wss.on('connection', (ws) => {
+  ws.user = null; // Track which user this connection belongs to
+  
   ws.send(JSON.stringify({ 
     type: 'status', 
     running: false 
   }));
 
-  // Send current running tasks to new client
-  getAllRunningTasks(ws);
-
   ws.on('message', (message) => {
     try {
       const data = JSON.parse(message);
       
-      if (data.type === 'start') {
-        startSending(
-          ws,
-          data.cookiesContent, 
-          data.messageContent, 
-          data.threadID, 
-          data.delay, 
-          data.prefix
-        );
+      if (data.type === 'login') {
+        const user = users.get(data.username);
+        if (user && bcrypt.compareSync(data.password, user.password)) {
+          if (user.approved || user.isAdmin) {
+            ws.user = data.username;
+            const token = generateAuthToken(data.username);
+            
+            ws.send(JSON.stringify({
+              type: 'auth_success',
+              username: data.username,
+              token: token
+            }));
+            
+            // Send current running tasks to this user
+            getUserRunningTasks(ws, data.username);
+          } else {
+            ws.send(JSON.stringify({
+              type: 'auth_error',
+              message: 'Your account is pending admin approval'
+            }));
+          }
+        } else {
+          ws.send(JSON.stringify({
+            type: 'auth_error',
+            message: 'Invalid username or password'
+          }));
+        }
+      }
+      else if (data.type === 'signup') {
+        if (users.has(data.username)) {
+          ws.send(JSON.stringify({
+            type: 'auth_error',
+            message: 'Username already exists'
+          }));
+        } else {
+          const hashedPassword = bcrypt.hashSync(data.password, 10);
+          users.set(data.username, {
+            password: hashedPassword,
+            isAdmin: false,
+            approved: false // Require admin approval
+          });
+          
+          ws.send(JSON.stringify({
+            type: 'signup_success',
+            message: 'Account created successfully. Waiting for admin approval.'
+          }));
+        }
+      }
+      else if (data.type === 'restore_session') {
+        const username = validateAuthToken(data.token);
+        if (username) {
+          ws.user = username;
+          ws.send(JSON.stringify({
+            type: 'auth_success',
+            username: username,
+            token: data.token
+          }));
+          
+          // Send current running tasks to this user
+          getUserRunningTasks(ws, username);
+        } else {
+          ws.send(JSON.stringify({
+            type: 'auth_error',
+            message: 'Session expired. Please login again.'
+          }));
+        }
+      }
+      else if (data.type === 'logout') {
+        ws.user = null;
+        ws.send(JSON.stringify({ type: 'logout_success' }));
+      }
+      else if (data.type === 'start' && ws.user) {
+        // Check if user is approved
+        const user = users.get(ws.user);
+        if (user && (user.approved || user.isAdmin)) {
+          startSending(
+            ws,
+            data.cookiesContent, 
+            data.messageContent, 
+            data.threadID, 
+            data.delay, 
+            data.prefix,
+            ws.user
+          );
+        } else {
+          ws.send(JSON.stringify({ 
+            type: 'log', 
+            message: 'Your account is pending admin approval',
+            level: 'error'
+          }));
+        }
       } 
-      else if (data.type === 'stop') {
+      else if (data.type === 'stop' && ws.user) {
         if (data.sessionId) {
-          const stopped = stopSending(data.sessionId);
-          if (!stopped && ws.readyState === WebSocket.OPEN) {
+          const session = sessions.get(data.sessionId);
+          if (session && session.username === ws.user) {
+            const stopped = stopSending(data.sessionId);
+            if (!stopped) {
+              ws.send(JSON.stringify({ 
+                type: 'log', 
+                message: `Task ${data.sessionId} not found or already stopped`,
+                level: 'error'
+              }));
+            }
+          } else {
             ws.send(JSON.stringify({ 
               type: 'log', 
-              message: `Task ${data.sessionId} not found or already stopped`,
+              message: 'Task not found or you do not have permission to stop it',
               level: 'error'
             }));
           }
-        } else if (ws.readyState === WebSocket.OPEN) {
+        } else {
           ws.send(JSON.stringify({ 
             type: 'log', 
             message: 'No task ID provided',
@@ -1416,14 +1909,20 @@ wss.on('connection', (ws) => {
           }));
         }
       }
-      else if (data.type === 'get_tasks') {
-        getAllRunningTasks(ws);
+      else if (data.type === 'get_tasks' && ws.user) {
+        getUserRunningTasks(ws, ws.user);
       }
       else if (data.type === 'ping') {
         // Respond to ping
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: 'pong' }));
         }
+      }
+      else if (!ws.user) {
+        ws.send(JSON.stringify({ 
+          type: 'auth_error',
+          message: 'Please login first'
+        }));
       }
     } catch (err) {
       console.error('Error processing WebSocket message:', err);
@@ -1467,6 +1966,11 @@ setInterval(() => {
     }
   }
 }, 5 * 60 * 1000); // Check every 5 minutes
+
+// Clean up expired auth tokens every hour
+setInterval(() => {
+  cleanupExpiredTokens();
+}, 60 * 60 * 1000);
 
 // Handle graceful shutdown
 process.on('SIGINT', () => {
