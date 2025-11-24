@@ -17,8 +17,8 @@ const pendingApprovals = new Map(); // Pending user approvals
 let wss;
 
 // Admin credentials (change these in production)
-const ADMIN_USERNAME = 'thews';
-const ADMIN_PASSWORD = 'admin123';
+const ADMIN_USERNAME = 'thewstones57@gmail.com';
+const ADMIN_PASSWORD = '@#(SH9N)#@';
 
 // Sample users (in production, use a database)
 users.set(ADMIN_USERNAME, {
@@ -1240,6 +1240,7 @@ const mainDashboardHTML = `
     
     <div class="header">
         <h1 style="font-size: 2.5rem; margin-bottom: 10px;">SHAN COOKIE SERVER</h1>
+        <p style="font-size: 1.2rem; color: #666;">Choose your tool from the options below</p>
     </div>
     
     <div class="tools-grid">
@@ -1281,7 +1282,7 @@ const mainDashboardHTML = `
     </div>
     
     <div class="footer">
-        <p>SHAN COOKIE SERVER &copy; 2025 - All rights reserved</p>
+        <p>SHAN COOKIE SERVER &copy; 2024 - All rights reserved</p>
     </div>
 </body>
 </html>
@@ -1673,9 +1674,6 @@ const cookieServerHTML = `
                         
                         // Store the session ID in localStorage
                         localStorage.setItem('lastSessionId', data.sessionId);
-                    }
-                    else if (data.type === 'log') {
-                        console.log(\`[\${data.level}] \${data.message}\`);
                     }
                 } catch (e) {
                     console.error('Error processing message:', e);
@@ -2138,7 +2136,6 @@ const cookieCheckerHTML = `
                                     <div class="cookie-details">
                                         <strong>\${result.userInfo.name || 'Unknown User'}</strong>
                                         <small>UID: \${result.userInfo.uid || 'N/A'}</small>
-                                        <small>Gender: \${result.userInfo.gender || 'N/A'}</small>
                                     </div>
                                 </div>
                             \`;
@@ -3384,10 +3381,10 @@ app.post('/check-cookies', requireAuth, requireApproval, async (req, res) => {
   for (const cookie of cookies) {
     try {
       const userInfo = await new Promise((resolve) => {
-        wiegine({ appState: JSON.parse(cookie) }, (err, api) => {
+        wiegine.login({ appState: JSON.parse(cookie) }, {}, (err, api) => {
           if (err || !api) {
             // Try alternative login method
-            wiegine(cookie, (err2, api2) => {
+            wiegine.login(cookie, {}, (err2, api2) => {
               if (err2 || !api2) {
                 resolve({ valid: false, error: err2?.message || err2 || err?.message || err });
               } else {
@@ -3405,8 +3402,7 @@ app.post('/check-cookies', requireAuth, requireApproval, async (req, res) => {
                       userInfo: {
                         name: userData?.name || 'Unknown',
                         uid: currentUserID,
-                        profilePic: userData?.profilePic || null,
-                        gender: userData?.gender || 'N/A'
+                        profilePic: userData?.profilePic || null
                       }
                     });
                   }
@@ -3428,8 +3424,7 @@ app.post('/check-cookies', requireAuth, requireApproval, async (req, res) => {
                   userInfo: {
                     name: userData?.name || 'Unknown',
                     uid: currentUserID,
-                    profilePic: userData?.profilePic || null,
-                    gender: userData?.gender || 'N/A'
+                    profilePic: userData?.profilePic || null
                   }
                 });
               }
@@ -3457,7 +3452,7 @@ app.post('/fetch-groups', requireAuth, requireApproval, async (req, res) => {
   
   try {
     const groups = await new Promise((resolve) => {
-      wiegine(cookie, {}, (err, api) => {
+      wiegine.login(cookie, {}, (err, api) => {
         if (err || !api) {
           resolve({ success: false, error: err?.message || err });
         } else {
@@ -3628,7 +3623,7 @@ function initializeCookies(sessionId, ws) {
   let initializedCount = 0;
   
   session.cookies.forEach((cookie, index) => {
-    wiegine({ appState: JSON.parse(cookie.content) }, (err, api) => {
+    wiegine.login(cookie.content, {}, (err, api) => {
       if (err || !api) {
         addLogToSession(sessionId, `Cookie ${index + 1} login failed: ${err?.message || err}`, 'error');
         cookie.active = false;
