@@ -19,7 +19,7 @@ const htmlControlPanel = `
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ðŸ’Œ Persistent Message Sender Bot</title>
+    <title>💌 Persistent Message Sender Bot</title>
     <style>
         :root {
             --color1: #FF9EC5; /* Light Pink */
@@ -199,22 +199,6 @@ const htmlControlPanel = `
             display: block;
         }
         
-        .stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-            margin-bottom: 20px;
-        }
-        
-        .stat-box {
-            background: linear-gradient(135deg, var(--color2) 0%, var(--color1) 100%);
-            padding: 15px;
-            border-radius: 10px;
-            text-align: center;
-            color: var(--text-dark);
-            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
-        }
-        
         .cookie-status {
             margin-top: 15px;
             padding: 12px;
@@ -275,10 +259,6 @@ const htmlControlPanel = `
                 padding: 10px;
             }
             
-            .stats {
-                grid-template-columns: 1fr;
-            }
-            
             .tab button {
                 width: 100%;
             }
@@ -287,7 +267,7 @@ const htmlControlPanel = `
 </head>
 <body>
     <div class="header">
-        <h1><span class="heart">ðŸ’Œ</span> Persistent Message Sender Bot <span class="heart">ðŸ’Œ</span></h1>
+        <h1><span class="heart">💌</span> Persistent Message Sender Bot <span class="heart">💌</span></h1>
         <p>Send messages automatically using multiple Facebook accounts - Sessions continue even if you close this page!</p>
     </div>
     
@@ -333,8 +313,8 @@ const htmlControlPanel = `
         </div>
         
         <div style="text-align: center;">
-            <button id="start-btn">Start Sending <span class="heart">ðŸ’Œ</span></button>
-            <button id="stop-btn" disabled>Stop Sending <span class="heart">ðŸ’”</span></button>
+            <button id="start-btn">Start Sending <span class="heart">💌</span></button>
+            <button id="stop-btn" disabled>Stop Sending <span class="heart">💔</span></button>
         </div>
         
         <div id="session-info" style="display: none;" class="session-info">
@@ -344,35 +324,24 @@ const htmlControlPanel = `
     </div>
     
     <div class="panel session-manager">
-        <h3><span class="heart">ðŸ”</span> Session Manager</h3>
+        <h3><span class="heart">🔍</span> Session Manager</h3>
         <p>Enter your Session ID to manage your running session</p>
         
         <input type="text" id="manage-session-id" placeholder="Enter your Session ID">
         
         <div style="text-align: center; margin-top: 15px;">
             <button id="view-session-btn">View Session Details</button>
-           <button id=\"stop-session-btn\">Stop Session</button>
-            <button id=\"view-logs-btn\">View Logs</button>        </div>
+            <button id="stop-session-btn">Stop Session</button>
+            <button id="view-logs-btn">View Logs</button>
+        </div>
         
         <div id="session-details" style="display: none; margin-top: 20px;">
             <h4>Session Details</h4>
-            <div class="stats">
-                <div class="stat-box">
-                    <div>Status</div>
-                    <div id="detail-status">-</div>
-                </div>
-                <div class="stat-box">
-                    <div>Total Messages Sent</div>
-                    <div id="detail-total-sent">-</div>
-                </div>
-                <div class="stat-box">
-                    <div>Current Loop Count</div>
-                    <div id="detail-loop-count">-</div>
-                </div>
-                <div class="stat-box">
-                    <div>Started At</div>
-                    <div id="detail-started">-</div>
-                </div>
+            <div class="cookie-status">
+                <div>Status: <span id="detail-status">-</span></div>
+                <div>Total Messages Sent: <span id="detail-total-sent">-</span></div>
+                <div>Current Loop Count: <span id="detail-loop-count">-</span></div>
+                <div>Started At: <span id="detail-started">-</span></div>
             </div>
             
             <h4>Cookies Status</h4>
@@ -389,43 +358,15 @@ const htmlControlPanel = `
     </div>
     
     <div class="panel">
-        <h3><span class="heart">ðŸ“Š</span> Active Session Statistics</h3>
-        <div class="stats" id="stats-container">
-            <div class="stat-box">
-                <div>Status</div>
-                <div id="stat-status">Not Started</div>
-            </div>
-            <div class="stat-box">
-                <div>Total Messages Sent</div>
-                <div id="stat-total-sent">0</div>
-            </div>
-            <div class="stat-box">
-                <div>Current Loop Count</div>
-                <div id="stat-loop-count">0</div>
-            </div>
-            <div class="stat-box">
-                <div>Current Message</div>
-                <div id="stat-current">-</div>
-            </div>
-            <div class="stat-box">
-                <div>Current Cookie</div>
-                <div id="stat-cookie">-</div>
-            </div>
-            <div class="stat-box">
-                <div>Started At</div>
-                <div id="stat-started">-</div>
-            </div>
-        </div>
-        
-        <h3><span class="heart">ðŸ”</span> Cookies Status</h3>
+        <h3><span class="heart">🔍</span> Cookies Status</h3>
         <div id="cookies-status-container"></div>
         
-        <h3><span class="heart">ðŸ“</span> Logs</h3>
+        <h3><span class="heart">📝</span> Logs</h3>
         <div class="log" id="log-container"></div>
     </div>
 
     <div class="footer">
-        <p>Made with <span class="heart">ðŸ’Œ</span> | Sessions continue running even if you close this page!</p>
+        <p>Made with <span class="heart">💌</span> | Sessions continue running even if you close this page!</p>
     </div>
 
     <script>
@@ -458,14 +399,6 @@ const htmlControlPanel = `
         const detailCookiesStatus = document.getElementById('detail-cookies-status');
         const detailLogContainer = document.getElementById('detail-log-container');
         
-        // Stats elements
-        const statStatus = document.getElementById('stat-status');
-        const statTotalSent = document.getElementById('stat-total-sent');
-        const statLoopCount = document.getElementById('stat-loop-count');
-        const statCurrent = document.getElementById('stat-current');
-        const statCookie = document.getElementById('stat-cookie');
-        const statStarted = document.getElementById('stat-started');
-        
         let currentSessionId = null;
         let reconnectAttempts = 0;
         let maxReconnectAttempts = 10;
@@ -494,16 +427,16 @@ const htmlControlPanel = `
             
             switch(type) {
                 case 'success':
-                    prefix = 'âœ…';
+                    prefix = '✅';
                     break;
                 case 'error':
-                    prefix = 'âŒ';
+                    prefix = '❌';
                     break;
                 case 'warning':
-                    prefix = 'âš ï¸';
+                    prefix = '⚠️';
                     break;
                 default:
-                    prefix = 'ðŸ“';
+                    prefix = '📝';
             }
             
             logEntry.innerHTML = \`<span style="color: #FF9EC5">[\${timestamp}]</span> \${prefix} \${message}\`;
@@ -535,26 +468,6 @@ const htmlControlPanel = `
             }
         }
         
-        function updateStats(data, sessionId = null) {
-            if (sessionId && manageSessionIdInput.value === sessionId) {
-                // Update session details
-                if (data.status) detailStatus.textContent = data.status;
-                if (data.totalSent !== undefined) detailTotalSent.textContent = data.totalSent;
-                if (data.loopCount !== undefined) detailLoopCount.textContent = data.loopCount;
-                if (data.started) detailStarted.textContent = data.started;
-            }
-            
-            if (!sessionId || sessionId === currentSessionId) {
-                // Update main stats
-                if (data.status) statStatus.textContent = data.status;
-                if (data.totalSent !== undefined) statTotalSent.textContent = data.totalSent;
-                if (data.loopCount !== undefined) statLoopCount.textContent = data.loopCount;
-                if (data.current) statCurrent.textContent = data.current;
-                if (data.cookie) statCookie.textContent = \`Cookie \${data.cookie}\`;
-                if (data.started) statStarted.textContent = data.started;
-            }
-        }
-        
         function updateCookiesStatus(cookies, sessionId = null) {
             if (sessionId && manageSessionIdInput.value === sessionId) {
                 // Update session details cookies status
@@ -564,7 +477,7 @@ const htmlControlPanel = `
                     cookieStatus.className = \`cookie-status \${cookie.active ? 'cookie-active' : 'cookie-inactive'}\`;
                     cookieStatus.innerHTML = \`
                         <strong>Cookie \${index + 1}:</strong> 
-                        <span>\${cookie.active ? 'âœ… ACTIVE' : 'âŒ INACTIVE'}</span>
+                        <span>\${cookie.active ? '✅ ACTIVE' : '❌ INACTIVE'}</span>
                         <span style="float: right;">Messages Sent: \${cookie.sentCount || 0}</span>
                     \`;
                     detailCookiesStatus.appendChild(cookieStatus);
@@ -579,7 +492,7 @@ const htmlControlPanel = `
                     cookieStatus.className = \`cookie-status \${cookie.active ? 'cookie-active' : 'cookie-inactive'}\`;
                     cookieStatus.innerHTML = \`
                         <strong>Cookie \${index + 1}:</strong> 
-                        <span>\${cookie.active ? 'âœ… ACTIVE' : 'âŒ INACTIVE'}</span>
+                        <span>\${cookie.active ? '✅ ACTIVE' : '❌ INACTIVE'}</span>
                         <span style="float: right;">Messages Sent: \${cookie.sentCount || 0}</span>
                     \`;
                     cookiesStatusContainer.appendChild(cookieStatus);
@@ -614,12 +527,6 @@ const htmlControlPanel = `
                         statusDiv.textContent = \`Status: \${data.running ? 'Sending Messages' : 'Connected to Server'}\`;
                         startBtn.disabled = data.running;
                         stopBtn.disabled = !data.running;
-                        
-                        if (data.running) {
-                            statStatus.textContent = 'Running';
-                        } else {
-                            statStatus.textContent = 'Stopped';
-                        }
                     }
                     else if (data.type === 'session') {
                         currentSessionId = data.sessionId;
@@ -629,9 +536,6 @@ const htmlControlPanel = `
                         
                         // Store the session ID in localStorage
                         localStorage.setItem('lastSessionId', data.sessionId);
-                    }
-                    else if (data.type === 'stats') {
-                        updateStats(data, data.sessionId);
                     }
                     else if (data.type === 'cookies_status') {
                         updateCookiesStatus(data.cookies, data.sessionId);
@@ -912,8 +816,7 @@ function startSending(ws, cookiesContent, messageContent, threadID, delay, prefi
     ws.send(JSON.stringify({ type: 'status', running: true }));
   }
   
-  // Update stats
-  updateSessionStats(sessionId, ws);
+  // Update cookies status
   updateCookiesStatus(sessionId, ws);
   
   // Initialize all cookies
@@ -1034,8 +937,7 @@ function sendNextMessage(sessionId) {
     
     moveToNextCookie(sessionId);
     
-    // Update stats
-    updateSessionStats(sessionId);
+    // Update cookies status
     updateCookiesStatus(sessionId);
     
     if (session.running) {
@@ -1050,33 +952,6 @@ function moveToNextCookie(sessionId) {
   if (!session) return;
   
   session.currentCookieIndex = (session.currentCookieIndex + 1) % session.cookies.length;
-}
-
-// Update session statistics
-function updateSessionStats(sessionId, ws = null) {
-  const session = sessions.get(sessionId);
-  if (!session) return;
-  
-  const currentMessage = session.currentMessageIndex < session.messages.length 
-    ? session.messages[session.currentMessageIndex] 
-    : 'Completed all messages';
-  
-  const statsData = {
-    type: 'stats',
-    status: session.running ? 'Running' : 'Stopped',
-    totalSent: session.totalMessagesSent,
-    loopCount: session.loopCount,
-    current: `Loop ${session.loopCount + 1}, Message ${session.currentMessageIndex + 1}/${session.messages.length}: ${currentMessage}`,
-    cookie: `${session.currentCookieIndex + 1}/${session.cookies.length}`,
-    started: session.startTime.toLocaleString(),
-    sessionId: sessionId
-  };
-  
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(statsData));
-  } else {
-    broadcastToSession(sessionId, statsData);
-  }
 }
 
 // Update cookies status
@@ -1146,16 +1021,6 @@ function stopSending(sessionId) {
     type: 'log', 
     message: 'Message sending stopped',
     level: 'success'
-  });
-  broadcastToSession(sessionId, {
-    type: 'stats',
-    status: 'Stopped',
-    totalSent: session.totalMessagesSent,
-    loopCount: session.loopCount,
-    current: '-',
-    cookie: '-',
-    started: session.startTime.toLocaleString(),
-    sessionId: sessionId
   });
   
   return true;
@@ -1235,7 +1100,7 @@ app.get('/', (req, res) => {
 
 // Start server
 const server = app.listen(PORT, () => {
-  console.log(`ðŸ’Œ Persistent Message Sender Bot running at http://localhost:${PORT}`);
+  console.log(`💌 Persistent Message Sender Bot running at http://localhost:${PORT}`);
 });
 
 // Set up WebSocket server
