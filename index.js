@@ -2,1232 +2,801 @@ const fs = require('fs');
 const express = require('express');
 const wiegine = require('fca-mafiya');
 const WebSocket = require('ws');
-const { v4: uuidv4 } = require('uuid');
+const path = require('path');
+const http = require('http');
 
-// Initialize Express app
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Configuration and session storage
-const sessions = new Map();
-let wss;
+// Create HTTP server
+const server = http.createServer(app);
 
-// HTML Control Panel with session management
-const htmlControlPanel = `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>💌 Persistent Message Sender Bot</title>
-    <style>
-        :root {
-            --color1: #FF9EC5; /* Light Pink */
-            --color2: #9ED2FF; /* Light Blue */
-            --color3: #FFFFFF; /* White */
-            --color4: #FFB6D9; /* Pink Heart */
-            --text-dark: #333333;
-            --text-light: #FFFFFF;
+// Middleware
+app.use(express.static('public'));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Store active sessions
+const activeSessions = new Map();
+
+// WebSocket Server
+const wss = new WebSocket.Server({ server });
+
+// WebSocket connection handling
+wss.on('connection', (ws) => {
+    console.log('🔗 New WebSocket Client Connected');
+    ws.send(JSON.stringify({ 
+        type: 'status', 
+        message: 'WebSocket Connected Successfully', 
+        status: 'connected' 
+    }));
+    
+    // Send current sessions to new client
+    broadcastSessionsUpdate();
+});
+
+// Broadcast to all WebSocket clients
+function broadcast(data) {
+    wss.clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify(data));
         }
-        
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-            background: linear-gradient(135deg, var(--color1) 0%, var(--color2) 100%);
-            color: var(--text-dark);
-            line-height: 1.6;
-        }
-        
-        .header {
-            text-align: center;
-            margin-bottom: 25px;
-            padding: 20px;
-            background: rgba(255, 255, 255, 0.8);
-            border-radius: 15px;
-            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
-        }
-        
-        .status {
-            padding: 15px;
-            margin-bottom: 20px;
-            border-radius: 10px;
-            font-weight: bold;
-            text-align: center;
-            background: rgba(255, 255, 255, 0.9);
-            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
-        }
-        
-        .online { background: linear-gradient(135deg, #4CAF50 0%, #8BC34A 100%); color: white; }
-        .offline { background: linear-gradient(135deg, #f44336 0%, #E91E63 100%); color: white; }
-        .connecting { background: linear-gradient(135deg, #ff9800 0%, #FFC107 100%); color: white; }
-        .server-connected { background: linear-gradient(135deg, var(--color2) 0%, var(--color1) 100%); color: var(--text-dark); }
-        
-        .panel {
-            background: rgba(255, 255, 255, 0.9);
-            padding: 25px;
-            border-radius: 15px;
-            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
-            margin-bottom: 25px;
-            backdrop-filter: blur(5px);
-        }
-        
-        button {
-            padding: 12px 20px;
-            margin: 8px;
-            cursor: pointer;
-            background: linear-gradient(135deg, var(--color2) 0%, var(--color1) 100%);
-            color: var(--text-dark);
-            border: none;
-            border-radius: 8px;
-            transition: all 0.3s;
-            font-weight: bold;
-            box-shadow: 0 3px 8px rgba(0, 0, 0, 0.1);
-        }
-        
-        button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
-        }
-        
-        button:disabled {
-            background: #cccccc;
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
-        }
-        
-        input, select, textarea {
-            padding: 12px 15px;
-            margin: 8px 0;
-            width: 100%;
-            border: 2px solid var(--color2);
-            border-radius: 8px;
-            background: rgba(255, 255, 255, 0.8);
-            color: var(--text-dark);
-            font-size: 16px;
-            transition: all 0.3s;
-            box-sizing: border-box;
-        }
-        
-        input:focus, select:focus, textarea:focus {
-            outline: none;
-            border-color: var(--color1);
-            box-shadow: 0 0 0 3px rgba(158, 210, 255, 0.3);
-        }
-        
-        .log {
-            height: 300px;
-            overflow-y: auto;
-            border: 2px solid var(--color2);
-            padding: 15px;
-            margin-top: 20px;
-            font-family: 'Courier New', monospace;
-            background: rgba(0, 0, 0, 0.8);
-            color: #00ff00;
-            border-radius: 10px;
-            box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.2);
-        }
-        
-        small {
-            color: #666;
-            font-size: 13px;
-        }
-        
-        h1, h2, h3 {
-            color: var(--text-dark);
-            margin-top: 0;
-        }
-        
-        h1 {
-            font-size: 2.5rem;
-            background: linear-gradient(135deg, var(--color1) 0%, var(--color2) 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            display: inline-block;
-        }
-        
-        .session-info {
-            background: linear-gradient(135deg, var(--color2) 0%, var(--color1) 100%);
-            padding: 15px;
-            border-radius: 10px;
-            margin-bottom: 15px;
-            color: var(--text-dark);
-        }
-        
-        .tab {
-            overflow: hidden;
-            border: 2px solid var(--color2);
-            background-color: rgba(255, 255, 255, 0.8);
-            border-radius: 10px;
-            margin-bottom: 20px;
-        }
-        
-        .tab button {
-            background: transparent;
-            float: left;
-            border: none;
-            outline: none;
-            cursor: pointer;
-            padding: 14px 20px;
-            transition: 0.3s;
-            margin: 0;
-            border-radius: 0;
-            width: 50%;
-        }
-        
-        .tab button:hover {
-            background: rgba(158, 210, 255, 0.2);
-        }
-        
-        .tab button.active {
-            background: linear-gradient(135deg, var(--color2) 0%, var(--color1) 100%);
-            color: var(--text-dark);
-        }
-        
-        .tabcontent {
-            display: none;
-            padding: 15px;
-            border: 2px solid var(--color2);
-            border-top: none;
-            border-radius: 0 0 10px 10px;
-            background: rgba(255, 255, 255, 0.8);
-        }
-        
-        .active-tab {
-            display: block;
-        }
-        
-        .cookie-status {
-            margin-top: 15px;
-            padding: 12px;
-            border-radius: 8px;
-            background: rgba(255, 255, 255, 0.8);
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-        }
-        
-        .cookie-active {
-            border-left: 5px solid #4CAF50;
-        }
-        
-        .cookie-inactive {
-            border-left: 5px solid #f44336;
-        }
-        
-        .heart {
-            color: var(--color4);
-            margin: 0 5px;
-        }
-        
-        .footer {
-            text-align: center;
-            margin-top: 30px;
-            color: var(--text-dark);
-            font-size: 14px;
-        }
-        
-        .session-manager {
-            margin-top: 20px;
-            padding: 15px;
-            background: rgba(255, 255, 255, 0.8);
-            border-radius: 10px;
-            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
-        }
-        
-        /* Custom scrollbar */
-        ::-webkit-scrollbar {
-            width: 8px;
-        }
-        
-        ::-webkit-scrollbar-track {
-            background: rgba(255, 255, 255, 0.3);
-            border-radius: 10px;
-        }
-        
-        ::-webkit-scrollbar-thumb {
-            background: linear-gradient(135deg, var(--color1) 0%, var(--color2) 100%);
-            border-radius: 10px;
-        }
-        
-        ::-webkit-scrollbar-thumb:hover {
-            background: linear-gradient(135deg, var(--color4) 0%, var(--color1) 100%);
-        }
-        
-        @media (max-width: 768px) {
-            body {
-                padding: 10px;
+    });
+}
+
+// Serve HTML Page
+app.get('/', (req, res) => {
+    res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>RAJ COOKIES SERVER</title>
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+                font-family: 'Arial', sans-serif;
             }
             
-            .tab button {
-                width: 100%;
+            body {
+                background: linear-gradient(135deg, #ffffff 0%, #ffe6f2 100%);
+                min-height: 100vh;
+                padding: 20px;
             }
-        }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <h1><span class="heart">💌</span> Persistent Message Sender Bot <span class="heart">💌</span></h1>
-        <p>Send messages automatically using multiple Facebook accounts - Sessions continue even if you close this page!</p>
-    </div>
-    
-    <div class="status server-connected" id="status">
-        Status: Connecting to server...
-    </div>
-    
-    <div class="panel">
-        <div class="tab">
-            <button class="tablinks active" onclick="openTab(event, 'cookie-file-tab')">Cookie File</button>
-            <button class="tablinks" onclick="openTab(event, 'cookie-text-tab')">Paste Cookies</button>
-        </div>
-        
-        <div id="cookie-file-tab" class="tabcontent active-tab">
-            <input type="file" id="cookie-file" accept=".txt">
-            <small>Select your cookies file (each line should contain one cookie)</small>
-        </div>
-        
-        <div id="cookie-text-tab" class="tabcontent">
-            <textarea id="cookie-text" placeholder="Paste your cookies here (one cookie per line)" rows="5"></textarea>
-            <small>Paste your cookies directly (one cookie per line)</small>
-        </div>
-        
-        <div>
-            <input type="text" id="thread-id" placeholder="Thread/Group ID">
-            <small>Enter the Facebook Group/Thread ID where messages will be sent</small>
-        </div>
-        
-        <div>
-            <input type="number" id="delay" value="5" min="1" placeholder="Delay in seconds">
-            <small>Delay between messages (in seconds)</small>
-        </div>
-        
-        <div>
-            <input type="text" id="prefix" placeholder="Message Prefix (Optional)">
-            <small>Optional prefix to add before each message</small>
-        </div>
-        
-        <div>
-            <label for="message-file">Messages File</label>
-            <input type="file" id="message-file" accept=".txt">
-            <small>Upload messages.txt file with messages (one per line)</small>
-        </div>
-        
-        <div style="text-align: center;">
-            <button id="start-btn">Start Sending <span class="heart">💌</span></button>
-            <button id="stop-btn" disabled>Stop Sending <span class="heart">💔</span></button>
-        </div>
-        
-        <div id="session-info" style="display: none;" class="session-info">
-            <h3>Your Session ID: <span id="session-id-display"></span></h3>
-            <p>Save this ID to stop your session later or view its details</p>
-        </div>
-    </div>
-    
-    <div class="panel session-manager">
-        <h3><span class="heart">🔍</span> Session Manager</h3>
-        <p>Enter your Session ID to manage your running session</p>
-        
-        <input type="text" id="manage-session-id" placeholder="Enter your Session ID">
-        
-        <div style="text-align: center; margin-top: 15px;">
-            <button id="view-session-btn">View Session Details</button>
-            <button id="stop-session-btn">Stop Session</button>
-            <button id="view-logs-btn">View Logs</button>
-        </div>
-        
-        <div id="session-details" style="display: none; margin-top: 20px;">
-            <h4>Session Details</h4>
-            <div class="cookie-status">
-                <div>Status: <span id="detail-status">-</span></div>
-                <div>Total Messages Sent: <span id="detail-total-sent">-</span></div>
-                <div>Current Loop Count: <span id="detail-loop-count">-</span></div>
-                <div>Started At: <span id="detail-started">-</span></div>
+            
+            .container {
+                max-width: 1200px;
+                margin: 0 auto;
+                background: white;
+                border-radius: 15px;
+                box-shadow: 0 10px 30px rgba(255, 105, 180, 0.2);
+                overflow: hidden;
+                border: 3px solid #ff69b4;
+            }
+            
+            .header {
+                background: linear-gradient(135deg, #ff69b4 0%, #ff1493 100%);
+                color: white;
+                padding: 25px;
+                text-align: center;
+                border-bottom: 3px solid #ff1493;
+            }
+            
+            .header h1 {
+                font-size: 2.5em;
+                font-weight: bold;
+                margin-bottom: 10px;
+                text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            }
+            
+            .header .developer {
+                font-size: 1.2em;
+                opacity: 0.9;
+                font-weight: bold;
+            }
+            
+            .content {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 20px;
+                padding: 25px;
+            }
+            
+            @media (max-width: 768px) {
+                .content {
+                    grid-template-columns: 1fr;
+                }
+            }
+            
+            .form-section, .logs-section {
+                background: #f8f9fa;
+                padding: 25px;
+                border-radius: 12px;
+                border: 2px solid #ffb6c1;
+            }
+            
+            .form-group {
+                margin-bottom: 20px;
+            }
+            
+            label {
+                display: block;
+                margin-bottom: 8px;
+                font-weight: bold;
+                color: #d63384;
+                font-size: 1.1em;
+            }
+            
+            input, textarea, select {
+                width: 100%;
+                padding: 12px;
+                border: 2px solid #ff69b4;
+                border-radius: 8px;
+                font-size: 1em;
+                background: white;
+                transition: all 0.3s ease;
+            }
+            
+            input:focus, textarea:focus, select:focus {
+                outline: none;
+                border-color: #ff1493;
+                box-shadow: 0 0 10px rgba(255, 20, 147, 0.3);
+            }
+            
+            textarea {
+                height: 120px;
+                resize: vertical;
+                font-family: monospace;
+            }
+            
+            .btn {
+                background: linear-gradient(135deg, #ff69b4 0%, #ff1493 100%);
+                color: white;
+                border: none;
+                padding: 15px 30px;
+                border-radius: 8px;
+                font-size: 1.1em;
+                font-weight: bold;
+                cursor: pointer;
+                transition: all 0.3s ease;
+                width: 100%;
+                margin: 5px 0;
+            }
+            
+            .btn:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 5px 15px rgba(255, 105, 180, 0.4);
+            }
+            
+            .btn-stop {
+                background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+            }
+            
+            .btn-clear {
+                background: linear-gradient(135deg, #6c757d 0%, #5a6268 100%);
+            }
+            
+            .logs-container {
+                background: #1a1a1a;
+                color: #00ff00;
+                padding: 15px;
+                border-radius: 8px;
+                height: 400px;
+                overflow-y: auto;
+                font-family: 'Courier New', monospace;
+                font-size: 0.9em;
+                border: 2px solid #333;
+            }
+            
+            .log-entry {
+                margin-bottom: 8px;
+                padding: 5px;
+                border-left: 3px solid #ff69b4;
+                padding-left: 10px;
+            }
+            
+            .log-success { color: #00ff00; }
+            .log-error { color: #ff4444; }
+            .log-warning { color: #ffaa00; }
+            .log-info { color: #44aaff; }
+            
+            .session-list {
+                margin-top: 20px;
+            }
+            
+            .session-item {
+                background: white;
+                padding: 15px;
+                margin: 10px 0;
+                border-radius: 8px;
+                border-left: 5px solid #ff69b4;
+                box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            }
+            
+            .status-connected {
+                color: #00ff00;
+                font-weight: bold;
+            }
+            
+            .status-disconnected {
+                color: #ff4444;
+                font-weight: bold;
+            }
+            
+            .websocket-status {
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                padding: 10px 20px;
+                border-radius: 20px;
+                font-weight: bold;
+                background: #28a745;
+                color: white;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            }
+            
+            .websocket-status.disconnected {
+                background: #dc3545;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>🌟 RAJ COOKIES SERVER 🌟</h1>
+                <div class="developer">DEVELOPER: R4J M1SHR4</div>
             </div>
             
-            <h4>Cookies Status</h4>
-            <div id="detail-cookies-status"></div>
-            
-            <h4>Session Logs</h4>
-            <div class="log" id="detail-log-container"></div>
+            <div class="content">
+                <div class="form-section">
+                    <h2>⚙️ Configuration</h2>
+                    <form id="botConfig">
+                        <div class="form-group">
+                            <label>🔐 Facebook Cookies:</label>
+                            <textarea id="cookies" placeholder="fr=0rhS117jZtNqb2drl.AWfob3XWOnYUH3kcgjblL2RUkiTOzv74KnqvOXsC7p1ASZWd8q8.BpIHYg..AAA.0.0.BpIHaI.AWd1Chpo4ISAo_F_kQYjaGV7MBg; locale=hi_IN; xs=47%3Ad32xc14WOJp82A%3A2%3A1763735100%3A-1%3A-1; pas=61583935177448%3ARM2BRkdHqY; c_user=61583935177448; ps_n=1; sb=IHYgaRy2otPWD_1ErU87NmJ_; wd=800x1280; ps_l=1; m_pixel_ratio=1.5; datr=IHYgaXp_jCdzcMNFrJ37EI6C;" required></textarea>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>👥 Group UID:</label>
+                            <input type="text" id="groupUID" placeholder="Enter Facebook Group UID" required>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>📝 Message Prefix:</label>
+                            <input type="text" id="prefix" placeholder="Prefix before each message" value="💬 ">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>⏰ Time Delay (seconds):</label>
+                            <input type="number" id="delay" placeholder="Delay between messages" value="10" min="5" required>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>📄 Message File:</label>
+                            <input type="file" id="messageFile" accept=".txt" required>
+                            <small>Select a .txt file with one message per line</small>
+                        </div>
+                        
+                        <button type="button" class="btn" onclick="startBot()">🚀 START BOT</button>
+                        <button type="button" class="btn btn-stop" onclick="stopAllSessions()">🛑 STOP ALL SESSIONS</button>
+                        <button type="button" class="btn btn-clear" onclick="clearLogs()">🧹 CLEAR LOGS</button>
+                    </form>
+                    
+                    <div class="session-list" id="sessionList">
+                        <h3>📋 Active Sessions</h3>
+                        <div id="sessionsContainer"></div>
+                    </div>
+                </div>
+                
+                <div class="logs-section">
+                    <h2>📊 Live Logs</h2>
+                    <div class="websocket-status" id="wsStatus">🔗 WebSocket Connected</div>
+                    <div class="logs-container" id="logsContainer">
+                        <div class="log-entry log-info">🌟 RAJ COOKIES SERVER Started</div>
+                        <div class="log-entry log-info">💡 Ready to configure and start bot</div>
+                    </div>
+                </div>
+            </div>
         </div>
 
-        <div id="log-view" style="display: none; margin-top: 20px;">
-            <h4>Session Logs</h4>
-            <div class="log" id="log-view-container"></div>
-        </div>
-    </div>
-    
-    <div class="panel">
-        <h3><span class="heart">🔍</span> Cookies Status</h3>
-        <div id="cookies-status-container"></div>
-        
-        <h3><span class="heart">📝</span> Logs</h3>
-        <div class="log" id="log-container"></div>
-    </div>
-
-    <div class="footer">
-        <p>Made with <span class="heart">💌</span> | Sessions continue running even if you close this page!</p>
-    </div>
-
-    <script>
-        const logContainer = document.getElementById('log-container');
-        const statusDiv = document.getElementById('status');
-        const startBtn = document.getElementById('start-btn');
-        const stopBtn = document.getElementById('stop-btn');
-        const cookieFileInput = document.getElementById('cookie-file');
-        const cookieTextInput = document.getElementById('cookie-text');
-        const threadIdInput = document.getElementById('thread-id');
-        const delayInput = document.getElementById('delay');
-        const prefixInput = document.getElementById('prefix');
-        const messageFileInput = document.getElementById('message-file');
-        const sessionInfoDiv = document.getElementById('session-info');
-        const sessionIdDisplay = document.getElementById('session-id-display');
-        const cookiesStatusContainer = document.getElementById('cookies-status-container');
-        
-        // Session manager elements
-        const manageSessionIdInput = document.getElementById('manage-session-id');
-        const viewSessionBtn = document.getElementById('view-session-btn');
-        const stopSessionBtn = document.getElementById('stop-session-btn');
-        const sessionDetailsDiv = document.getElementById('session-details');
-        const viewLogsBtn = document.getElementById('view-logs-btn');
-        const logViewDiv = document.getElementById('log-view');
-        const logViewContainer = document.getElementById('log-view-container');
-        const detailStatus = document.getElementById('detail-status');
-        const detailTotalSent = document.getElementById('detail-total-sent');
-        const detailLoopCount = document.getElementById('detail-loop-count');
-        const detailStarted = document.getElementById('detail-started');
-        const detailCookiesStatus = document.getElementById('detail-cookies-status');
-        const detailLogContainer = document.getElementById('detail-log-container');
-        
-        let currentSessionId = null;
-        let reconnectAttempts = 0;
-        let maxReconnectAttempts = 10;
-        let socket = null;
-        let sessionLogs = new Map();
-
-        function openTab(evt, tabName) {
-            const tabcontent = document.getElementsByClassName("tabcontent");
-            for (let i = 0; i < tabcontent.length; i++) {
-                tabcontent[i].style.display = "none";
-            }
+        <script>
+            let ws;
+            let sessions = {};
+            let reconnectAttempts = 0;
+            const maxReconnectAttempts = 5;
             
-            const tablinks = document.getElementsByClassName("tablinks");
-            for (let i = 0; i < tablinks.length; i++) {
-                tablinks[i].className = tablinks[i].className.replace(" active", "");
-            }
-            
-            document.getElementById(tabName).style.display = "block";
-            evt.currentTarget.className += " active";
-        }
-
-        function addLog(message, type = 'info', sessionId = null) {
-            const logEntry = document.createElement('div');
-            const timestamp = new Date().toLocaleTimeString();
-            let prefix = '';
-            
-            switch(type) {
-                case 'success':
-                    prefix = '✅';
-                    break;
-                case 'error':
-                    prefix = '❌';
-                    break;
-                case 'warning':
-                    prefix = '⚠️';
-                    break;
-                default:
-                    prefix = '📝';
-            }
-            
-            logEntry.innerHTML = \`<span style="color: #FF9EC5">[\${timestamp}]</span> \${prefix} \${message}\`;
-            
-            if (sessionId) {
-                // Store log for specific session
-                if (!sessionLogs.has(sessionId)) {
-                    sessionLogs.set(sessionId, []);
-                }
-                sessionLogs.get(sessionId).push(logEntry.innerHTML);
+            function connectWebSocket() {
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = protocol + '//' + window.location.host;
                 
-                // If we're currently viewing this session, add to detail log
-                if (manageSessionIdInput.value === sessionId) {
-                    detailLogContainer.appendChild(logEntry.cloneNode(true));
-                    // Truncate log to 20 entries
-                    while (detailLogContainer.children.length > 20) {
-                        detailLogContainer.removeChild(detailLogContainer.firstChild);
-                    }
-                    detailLogContainer.scrollTop = detailLogContainer.scrollHeight;
-                }
-            } else {
-                // Add to main log
-                logContainer.appendChild(logEntry);
-                // Truncate log to 20 entries
-                while (logContainer.children.length > 20) {
-                    logContainer.removeChild(logContainer.firstChild);
-                }
-                logContainer.scrollTop = logContainer.scrollHeight;
-            }
-        }
-        
-        function updateCookiesStatus(cookies, sessionId = null) {
-            if (sessionId && manageSessionIdInput.value === sessionId) {
-                // Update session details cookies status
-                detailCookiesStatus.innerHTML = '';
-                cookies.forEach((cookie, index) => {
-                    const cookieStatus = document.createElement('div');
-                    cookieStatus.className = \`cookie-status \${cookie.active ? 'cookie-active' : 'cookie-inactive'}\`;
-                    cookieStatus.innerHTML = \`
-                        <strong>Cookie \${index + 1}:</strong> 
-                        <span>\${cookie.active ? '✅ ACTIVE' : '❌ INACTIVE'}</span>
-                        <span style="float: right;">Messages Sent: \${cookie.sentCount || 0}</span>
-                    \`;
-                    detailCookiesStatus.appendChild(cookieStatus);
-                });
-            }
-            
-            if (!sessionId || sessionId === currentSessionId) {
-                // Update main cookies status
-                cookiesStatusContainer.innerHTML = '';
-                cookies.forEach((cookie, index) => {
-                    const cookieStatus = document.createElement('div');
-                    cookieStatus.className = \`cookie-status \${cookie.active ? 'cookie-active' : 'cookie-inactive'}\`;
-                    cookieStatus.innerHTML = \`
-                        <strong>Cookie \${index + 1}:</strong> 
-                        <span>\${cookie.active ? '✅ ACTIVE' : '❌ INACTIVE'}</span>
-                        <span style="float: right;">Messages Sent: \${cookie.sentCount || 0}</span>
-                    \`;
-                    cookiesStatusContainer.appendChild(cookieStatus);
-                });
-            }
-        }
-
-        function connectWebSocket() {
-            // Dynamic protocol for Render
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            socket = new WebSocket(protocol + '//' + window.location.host);
-
-            socket.onopen = () => {
-                addLog('Connected to server successfully', 'success');
-                statusDiv.className = 'status server-connected';
-                statusDiv.textContent = 'Status: Connected to Server';
-                reconnectAttempts = 0;
+                ws = new WebSocket(wsUrl);
                 
-                // Request list of active sessions
-                socket.send(JSON.stringify({ type: 'list_sessions' }));
-            };
-            
-            socket.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    
-                    if (data.type === 'log') {
-                        addLog(data.message, data.level || 'info', data.sessionId);
-                    } 
-                    else if (data.type === 'status') {
-                        statusDiv.className = data.running ? 'status online' : 'status server-connected';
-                        statusDiv.textContent = \`Status: \${data.running ? 'Sending Messages' : 'Connected to Server'}\`;
-                        startBtn.disabled = data.running;
-                        stopBtn.disabled = !data.running;
-                    }
-                    else if (data.type === 'session') {
-                        currentSessionId = data.sessionId;
-                        sessionIdDisplay.textContent = data.sessionId;
-                        sessionInfoDiv.style.display = 'block';
-                        addLog(\`Your session ID: \${data.sessionId}\`, 'success');
-                        
-                        // Store the session ID in localStorage
-                        localStorage.setItem('lastSessionId', data.sessionId);
-                    }
-                    else if (data.type === 'cookies_status') {
-                        updateCookiesStatus(data.cookies, data.sessionId);
-                    }
-                    else if (data.type === 'session_details') {
-                        // Display session details
-                        detailStatus.textContent = data.status;
-                        detailTotalSent.textContent = data.totalSent;
-                        detailLoopCount.textContent = data.loopCount;
-                        detailStarted.textContent = data.started;
-                        sessionDetailsDiv.style.display = 'block';
-                        
-                        // Show stored logs for this session
-                        if (sessionLogs.has(data.sessionId)) {
-                            detailLogContainer.innerHTML = sessionLogs.get(data.sessionId).join('');
-                            detailLogContainer.scrollTop = detailLogContainer.scrollHeight;
-                        }
-                    }
-                    else if (data.type === 'session_logs') {
-                        // Update the dedicated log view
-                        const logHtml = data.logs.map(log => \`<div class="log-entry">\${log}</div>\`).join('');
-                        logViewContainer.innerHTML = logHtml;
-                        logViewContainer.scrollTop = logViewContainer.scrollHeight;
-                    }
-                    else if (data.type === 'session_list') {
-                        addLog(\`Found \${data.count} active sessions\`, 'info');
-                    }
-                } catch (e) {
-                    console.error('Error processing message:', e);
-                }
-            };
-            
-            socket.onclose = (event) => {
-                if (!event.wasClean && reconnectAttempts < maxReconnectAttempts) {
-                    addLog(\`Connection closed unexpectedly. Attempting to reconnect... (\${reconnectAttempts + 1}/\${maxReconnectAttempts})\`, 'warning');
-                    statusDiv.className = 'status connecting';
-                    statusDiv.textContent = 'Status: Reconnecting...';
-                    
-                    setTimeout(() => {
-                        reconnectAttempts++;
-                        connectWebSocket();
-                    }, 3000);
-                } else {
-                    addLog('Disconnected from server', 'error');
-                    statusDiv.className = 'status offline';
-                    statusDiv.textContent = 'Status: Disconnected';
-                }
-            };
-            
-            socket.onerror = (error) => {
-                addLog(\`WebSocket error: \${error.message || 'Unknown error'}\`, 'error');
-                statusDiv.className = 'status offline';
-                statusDiv.textContent = 'Status: Connection Error';
-            };
-        }
-
-        // Initial connection
-        connectWebSocket();
-
-        startBtn.addEventListener('click', () => {
-            let cookiesContent = '';
-            
-            // Check which cookie input method is active
-            const cookieFileTab = document.getElementById('cookie-file-tab');
-            if (cookieFileTab.style.display !== 'none' && cookieFileInput.files.length > 0) {
-                const cookieFile = cookieFileInput.files[0];
-                const reader = new FileReader();
-                
-                reader.onload = (event) => {
-                    cookiesContent = event.target.result;
-                    processStart(cookiesContent);
+                ws.onopen = function() {
+                    reconnectAttempts = 0;
+                    document.getElementById('wsStatus').textContent = '🔗 WebSocket Connected';
+                    document.getElementById('wsStatus').className = 'websocket-status';
+                    addLog('WebSocket connection established', 'success');
                 };
                 
-                reader.readAsText(cookieFile);
-            } 
-            else if (cookieTextInput.value.trim()) {
-                cookiesContent = cookieTextInput.value.trim();
-                processStart(cookiesContent);
+                ws.onmessage = function(event) {
+                    try {
+                        const data = JSON.parse(event.data);
+                        handleWebSocketMessage(data);
+                    } catch (e) {
+                        console.error('WebSocket message error:', e);
+                    }
+                };
+                
+                ws.onclose = function() {
+                    document.getElementById('wsStatus').textContent = '🔌 WebSocket Disconnected';
+                    document.getElementById('wsStatus').className = 'websocket-status disconnected';
+                    addLog('WebSocket disconnected', 'error');
+                    
+                    if (reconnectAttempts < maxReconnectAttempts) {
+                        reconnectAttempts++;
+                        setTimeout(connectWebSocket, 3000);
+                    }
+                };
+                
+                ws.onerror = function(error) {
+                    addLog('WebSocket error', 'error');
+                };
             }
-            else {
-                addLog('Please provide cookie content', 'error');
-                return;
+            
+            function handleWebSocketMessage(data) {
+                switch(data.type) {
+                    case 'status':
+                        addLog(data.message, data.status);
+                        break;
+                    case 'log':
+                        addLog(data.message, data.level);
+                        break;
+                    case 'session_update':
+                        updateSessions(data.sessions);
+                        break;
+                    case 'message_sent':
+                        addLog(\`✅ Message sent to \${data.groupUID}: \${data.message}\`, 'success');
+                        break;
+                    case 'error':
+                        addLog(\`❌ Error: \${data.message}\`, 'error');
+                        break;
+                }
             }
+            
+            function addLog(message, level = 'info') {
+                const logsContainer = document.getElementById('logsContainer');
+                const logEntry = document.createElement('div');
+                logEntry.className = 'log-entry log-' + level;
+                logEntry.innerHTML = \`[\${new Date().toLocaleTimeString()}] \${message}\`;
+                logsContainer.appendChild(logEntry);
+                logsContainer.scrollTop = logsContainer.scrollHeight;
+            }
+            
+            function startBot() {
+                const cookies = document.getElementById('cookies').value.trim();
+                const groupUID = document.getElementById('groupUID').value.trim();
+                const prefix = document.getElementById('prefix').value.trim();
+                const delay = parseInt(document.getElementById('delay').value);
+                const fileInput = document.getElementById('messageFile');
+                
+                if (!cookies || !groupUID || !fileInput.files.length) {
+                    addLog('❌ Please fill all required fields', 'error');
+                    return;
+                }
+                
+                if (delay < 5) {
+                    addLog('❌ Delay should be at least 5 seconds', 'error');
+                    return;
+                }
+                
+                const file = fileInput.files[0];
+                const reader = new FileReader();
+                
+                reader.onload = function(e) {
+                    const messages = e.target.result.split('\\n')
+                        .map(msg => msg.trim())
+                        .filter(msg => msg.length > 0);
+                    
+                    if (messages.length === 0) {
+                        addLog('❌ No valid messages found in file', 'error');
+                        return;
+                    }
+                    
+                    const config = {
+                        cookies,
+                        groupUID,
+                        prefix,
+                        delay,
+                        messages
+                    };
+                    
+                    fetch('/start', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(config)
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            addLog(\`✅ Bot started successfully! Session ID: \${data.sessionId}\`, 'success');
+                        } else {
+                            addLog(\`❌ Failed to start bot: \${data.error}\`, 'error');
+                        }
+                    })
+                    .catch(error => {
+                        addLog(\`❌ Error starting bot: \${error.message}\`, 'error');
+                    });
+                };
+                
+                reader.onerror = function() {
+                    addLog('❌ Error reading file', 'error');
+                };
+                
+                reader.readAsText(file);
+            }
+            
+            function stopSession(sessionId) {
+                fetch('/stop', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ sessionId })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        addLog(\`✅ Session \${sessionId} stopped\`, 'success');
+                    delete sessions[sessionId];
+                        updateSessionsDisplay();
+                    } else {
+                        addLog(\`❌ Failed to stop session: \${data.error}\`, 'error');
+                    }
+                })
+                .catch(error => {
+                    addLog(\`❌ Error stopping session: \${error.message}\`, 'error');
+                });
+            }
+            
+            function stopAllSessions() {
+                fetch('/stop-all', {
+                    method: 'POST'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        addLog('✅ All sessions stopped', 'success');
+                        sessions = {};
+                        updateSessionsDisplay();
+                    }
+                })
+                .catch(error => {
+                    addLog(\`❌ Error stopping sessions: \${error.message}\`, 'error');
+                });
+            }
+            
+            function updateSessions(sessionsData) {
+                sessions = sessionsData;
+                updateSessionsDisplay();
+            }
+            
+            function updateSessionsDisplay() {
+                const container = document.getElementById('sessionsContainer');
+                container.innerHTML = '';
+                
+                if (Object.keys(sessions).length === 0) {
+                    container.innerHTML = '<div style="text-align: center; color: #666; padding: 20px;">No active sessions</div>';
+                    return;
+                }
+                
+                for (const [sessionId, session] of Object.entries(sessions)) {
+                    const sessionDiv = document.createElement('div');
+                    sessionDiv.className = 'session-item';
+                    sessionDiv.innerHTML = \`
+                        <strong>Session ID:</strong> \${sessionId}<br>
+                        <strong>Group UID:</strong> \${session.groupUID}<br>
+                        <strong>Status:</strong> <span class="\${session.status === 'connected' ? 'status-connected' : 'status-disconnected'}">\${session.status}</span><br>
+                        <strong>Messages Sent:</strong> \${session.messagesSent}<br>
+                        <strong>Delay:</strong> \${session.delay} seconds<br>
+                        <button class="btn btn-stop" onclick="stopSession('\${sessionId}')" style="margin-top: 10px; padding: 8px 15px; font-size: 0.9em;">Stop Session</button>
+                    \`;
+                    container.appendChild(sessionDiv);
+                }
+            }
+            
+            function clearLogs() {
+                document.getElementById('logsContainer').innerHTML = '';
+                addLog('Logs cleared', 'info');
+            }
+            
+            // Initialize WebSocket connection when page loads
+            window.onload = function() {
+                connectWebSocket();
+                
+                // Load initial sessions
+                fetch('/sessions')
+                    .then(response => response.json())
+                    .then(data => {
+                        updateSessions(data.sessions);
+                    })
+                    .catch(error => {
+                        addLog('Error loading sessions: ' + error.message, 'error');
+                    });
+            };
+        </script>
+    </body>
+    </html>
+    `);
+});
+
+// API Routes
+app.post('/start', async (req, res) => {
+    try {
+        const { cookies, groupUID, prefix, delay, messages } = req.body;
+        
+        if (!cookies || !groupUID || !messages) {
+            return res.json({ success: false, error: 'Missing required fields' });
+        }
+        
+        const sessionId = 'session_' + Date.now();
+        
+        broadcast({
+            type: 'log',
+            message: '🔄 Starting Facebook login...',
+            level: 'info'
         });
         
-        function processStart(cookiesContent) {
-            if (!threadIdInput.value.trim()) {
-                addLog('Please enter a Thread/Group ID', 'error');
-                return;
+        // Convert cookies string to appState object
+        const appState = parseCookies(cookies);
+        
+        if (!appState || appState.length === 0) {
+            broadcast({
+                type: 'error',
+                message: 'Invalid cookies format'
+            });
+            return res.json({ success: false, error: 'Invalid cookies format' });
+        }
+        
+        // Initialize Facebook API
+        wiegine({ appState }, (err, api) => {
+            if (err) {
+                const errorMsg = err.error || 'Login failed';
+                broadcast({
+                    type: 'error', 
+                    message: `Login failed: ${errorMsg}`
+                });
+                return res.json({ success: false, error: errorMsg });
             }
             
-            if (messageFileInput.files.length === 0) {
-                addLog('Please select a messages file', 'error');
-                return;
-            }
+            const userID = api.getCurrentUserID();
+            broadcast({ 
+                type: 'log', 
+                message: `✅ Logged in successfully as ${userID}`,
+                level: 'success'
+            });
             
-            const messageFile = messageFileInput.files[0];
-            const reader = new FileReader();
-            
-            reader.onload = (event) => {
-                const messageContent = event.target.result;
-                const threadID = threadIdInput.value.trim();
-                const delay = parseInt(delayInput.value) || 5;
-                const prefix = prefixInput.value.trim();
-                
-                if (socket && socket.readyState === WebSocket.OPEN) {
-                    socket.send(JSON.stringify({
-                        type: 'start',
-                        cookiesContent,
-                        messageContent,
-                        threadID,
-                        delay,
-                        prefix
-                    }));
-                } else {
-                    addLog('Connection not ready. Please try again.', 'error');
-                    connectWebSocket();
-                }
+            const session = {
+                api,
+                groupUID,
+                prefix: prefix || '',
+                delay: (delay || 10) * 1000, // Convert to milliseconds
+                messages: messages || [],
+                currentIndex: 0,
+                messagesSent: 0,
+                status: 'connected',
+                intervalId: null,
+                userID: userID
             };
             
-            reader.readAsText(messageFile);
-        }
-        
-        stopBtn.addEventListener('click', () => {
-            if (currentSessionId) {
-                if (socket && socket.readyState === WebSocket.OPEN) {
-                    socket.send(JSON.stringify({ 
-                        type: 'stop', 
-                        sessionId: currentSessionId 
-                    }));
-                } else {
-                    addLog('Connection not ready. Please try again.', 'error');
+            // Start message loop
+            session.intervalId = setInterval(() => {
+                if (!session.messages || session.messages.length === 0) {
+                    broadcast({
+                        type: 'error',
+                        message: 'No messages available to send'
+                    });
+                    return;
                 }
-            } else {
-                addLog('No active session to stop', 'error');
-            }
-        });
-        
-        viewLogsBtn.addEventListener('click', () => {
-            const sessionId = manageSessionIdInput.value.trim();
-            if (sessionId) {
-                if (socket && socket.readyState === WebSocket.OPEN) {
-                    socket.send(JSON.stringify({ 
-                        type: 'view_logs', 
-                        sessionId: sessionId 
-                    }));
-                    logViewDiv.style.display = 'block';
-                    sessionDetailsDiv.style.display = 'none'; // Hide session details when viewing logs
-                } else {
-                    addLog('Connection not ready. Please try again.', 'error');
+                
+                if (session.currentIndex >= session.messages.length) {
+                    session.currentIndex = 0; // Restart from beginning
                 }
-            } else {
-                addLog('Please enter a Session ID to view logs', 'warning');
-            }
-        });
-
-        viewSessionBtn.addEventListener('click', () => {
-            const sessionId = manageSessionIdInput.value.trim();
-            if (sessionId) {
-                if (socket && socket.readyState === WebSocket.OPEN) {
-                    socket.send(JSON.stringify({ 
-                        type: 'view_session', 
-                        sessionId: sessionId 
-                    }));
-                    addLog(\`Requesting details for session: \${sessionId}\`, 'success');
-                } else {
-                    addLog('Connection not ready. Please try again.', 'error');
-                }
-            } else {
-                addLog('Please enter a session ID', 'error');
-            }
-        });
-        
-        stopSessionBtn.addEventListener('click', () => {
-            const sessionId = manageSessionIdInput.value.trim();
-            if (sessionId) {
-                if (socket && socket.readyState === WebSocket.OPEN) {
-                    socket.send(JSON.stringify({ 
-                        type: 'stop', 
-                        sessionId: sessionId 
-                    }));
-                    addLog(\`Stop command sent for session: \${sessionId}\`, 'success');
-                } else {
-                    addLog('Connection not ready. Please try again.', 'error');
-                }
-            } else {
-                addLog('Please enter a session ID', 'error');
-            }
-        });
-        
-        // Check if we have a previous session ID
-        window.addEventListener('load', () => {
-            const lastSessionId = localStorage.getItem('lastSessionId');
-            if (lastSessionId) {
-                manageSessionIdInput.value = lastSessionId;
-                addLog(\`Found your previous session ID: \${lastSessionId}\`, 'info');
-            }
+                
+                const messageText = session.prefix + session.messages[session.currentIndex];
+                
+                api.sendMessage(messageText, session.groupUID, (err, messageInfo) => {
+                    if (err) {
+                        broadcast({
+                            type: 'error',
+                            message: `Failed to send message: ${err.error}`
+                        });
+                    } else {
+                        session.messagesSent++;
+                        broadcast({
+                            type: 'message_sent',
+                            message: messageText,
+                            groupUID: session.groupUID,
+                            count: session.messagesSent
+                        });
+                        
+                        // Update session in storage
+                        activeSessions.set(sessionId, session);
+                        broadcastSessionsUpdate();
+                    }
+                });
+                
+                session.currentIndex++;
+                
+            }, session.delay);
+            
+            activeSessions.set(sessionId, session);
+            broadcastSessionsUpdate();
+            
+            broadcast({
+                type: 'log',
+                message: `🚀 Bot started for group ${groupUID}. Sending messages every ${delay} seconds`,
+                level: 'success'
+            });
+            
+            res.json({ success: true, sessionId });
         });
         
-        // Keep connection alive
-        setInterval(() => {
-            if (socket && socket.readyState === WebSocket.OPEN) {
-                socket.send(JSON.stringify({ type: 'ping' }));
-            }
-        }, 30000);
-        
-        addLog('Control panel ready. Please configure your settings and start sending.', 'success');
-    </script>
-</body>
-</html>
-`;
-
-// Start message sending function with multiple cookies support
-function startSending(ws, cookiesContent, messageContent, threadID, delay, prefix) {
-  const sessionId = uuidv4();
-  
-  // Parse cookies (one per line)
-  const cookies = cookiesContent
-    .split('\n')
-    .map(line => line.trim())
-    .filter(line => line.length > 0)
-    .map((cookie, index) => ({
-      id: index + 1,
-      content: cookie,
-      active: false,
-      sentCount: 0,
-      api: null
-    }));
-  
-  if (cookies.length === 0) {
-    ws.send(JSON.stringify({ type: 'log', message: 'No cookies found', level: 'error' }));
-    return;
-  }
-  
-  // Parse messages
-  const messages = messageContent
-    .split('\n')
-    .map(line => line.trim())
-    .filter(line => line.length > 0);
-  
-  if (messages.length === 0) {
-    ws.send(JSON.stringify({ type: 'log', message: 'No messages found in the file', level: 'error' }));
-    return;
-  }
-
-  // Create session object
-  const session = {
-    id: sessionId,
-    threadID: threadID,
-    messages: messages,
-    cookies: cookies,
-    currentCookieIndex: 0,
-    currentMessageIndex: 0,
-    totalMessagesSent: 0,
-    loopCount: 0,
-    delay: delay,
-    prefix: prefix,
-    running: true,
-    startTime: new Date(),
-    ws: null, // Don't store WebSocket reference to prevent memory leaks
-    lastActivity: Date.now(),
-    logs: [] // Array to store server-side logs
-  };
-  
-  // Store session
-  sessions.set(sessionId, session);
-  
-  // Send session ID to client
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ 
-      type: 'session', 
-      sessionId: sessionId 
-    }));
-    
-    ws.send(JSON.stringify({ type: 'log', message: `Session started with ID: ${sessionId}`, level: 'success', sessionId }));
-    ws.send(JSON.stringify({ type: 'log', message: `Loaded ${cookies.length} cookies`, level: 'success', sessionId }));
-    ws.send(JSON.stringify({ type: 'log', message: `Loaded ${messages.length} messages`, level: 'success', sessionId }));
-    ws.send(JSON.stringify({ type: 'status', running: true }));
-  }
-  
-  // Update cookies status
-  updateCookiesStatus(sessionId, ws);
-  
-  // Initialize all cookies
-  initializeCookies(sessionId, ws);
-}
-
-// Initialize all cookies by logging in
-function initializeCookies(sessionId, ws) {
-  const session = sessions.get(sessionId);
-  if (!session || !session.running) return;
-  
-  let initializedCount = 0;
-  
-  session.cookies.forEach((cookie, index) => {
-    wiegine.login(cookie.content, {}, (err, api) => {
-      if (err || !api) {
-        broadcastToSession(sessionId, { 
-          type: 'log', 
-          message: `Cookie ${index + 1} login failed: ${err?.message || err}`,
-          level: 'error'
+    } catch (error) {
+        console.error('Error starting bot:', error);
+        broadcast({
+            type: 'error',
+            message: `Server error: ${error.message}`
         });
-        cookie.active = false;
-      } else {
-        cookie.api = api;
-        cookie.active = true;
-        broadcastToSession(sessionId, { 
-          type: 'log', 
-          message: `Cookie ${index + 1} logged in successfully`,
-          level: 'success'
-        });
-      }
-      
-      initializedCount++;
-      
-      // If all cookies are initialized, start sending messages
-      if (initializedCount === session.cookies.length) {
-        const activeCookies = session.cookies.filter(c => c.active);
-        if (activeCookies.length > 0) {
-          broadcastToSession(sessionId, { 
-            type: 'log', 
-            message: `${activeCookies.length}/${session.cookies.length} cookies active, starting message sending`,
-            level: 'success'
-          });
-          sendNextMessage(sessionId);
-        } else {
-          broadcastToSession(sessionId, { 
-            type: 'log', 
-            message: 'No active cookies, stopping session',
-            level: 'error'
-          });
-          stopSending(sessionId);
-        }
-      }
-    });
-  });
-}
-
-// Send next message in sequence with multiple cookies
-function sendNextMessage(sessionId) {
-  const session = sessions.get(sessionId);
-  if (!session || !session.running) return;
-
-  // Update last activity time
-  session.lastActivity = Date.now();
-
-  // Get current cookie and message
-  const cookie = session.cookies[session.currentCookieIndex];
-  const messageIndex = session.currentMessageIndex;
-  const message = session.prefix 
-    ? `${session.prefix} ${session.messages[messageIndex]}`
-    : session.messages[messageIndex];
-  
-  if (!cookie.active || !cookie.api) {
-    // Skip inactive cookies and move to next
-    broadcastToSession(sessionId, { 
-      type: 'log', 
-      message: `Cookie ${session.currentCookieIndex + 1} is inactive, skipping`,
-      level: 'warning'
-    });
-    moveToNextCookie(sessionId);
-    setTimeout(() => sendNextMessage(sessionId), 1000); // Short delay before trying next cookie
-    return;
-  }
-  
-  // Send the message
-  cookie.api.sendMessage(message, session.threadID, (err) => {
-    if (err) {
-      broadcastToSession(sessionId, { 
-        type: 'log', 
-        message: `Cookie ${session.currentCookieIndex + 1} failed to send message: ${err.message}`,
-        level: 'error'
-      });
-      cookie.active = false; // Mark cookie as inactive on error
-    } else {
-      session.totalMessagesSent++;
-      cookie.sentCount = (cookie.sentCount || 0) + 1;
-      
-      broadcastToSession(sessionId, { 
-        type: 'log', 
-        message: `Cookie ${session.currentCookieIndex + 1} sent message ${session.totalMessagesSent} (Loop ${session.loopCount + 1}, Message ${messageIndex + 1}/${session.messages.length}): ${message}`,
-        level: 'success'
-      });
+        res.json({ success: false, error: error.message });
     }
-    
-    // Move to next message and cookie
-    session.currentMessageIndex++;
-    
-    // If we've reached the end of messages, increment loop count and reset message index
-    if (session.currentMessageIndex >= session.messages.length) {
-      session.currentMessageIndex = 0;
-      session.loopCount++;
-      broadcastToSession(sessionId, { 
-        type: 'log', 
-        message: `Completed loop ${session.loopCount}, restarting from first message`,
-        level: 'success'
-      });
-    }
-    
-    moveToNextCookie(sessionId);
-    
-    // Update cookies status
-    updateCookiesStatus(sessionId);
-    
-    if (session.running) {
-      setTimeout(() => sendNextMessage(sessionId), session.delay * 1000);
-    }
-  });
-}
-
-// Move to the next cookie in rotation
-function moveToNextCookie(sessionId) {
-  const session = sessions.get(sessionId);
-  if (!session) return;
-  
-  session.currentCookieIndex = (session.currentCookieIndex + 1) % session.cookies.length;
-}
-
-// Update cookies status
-function updateCookiesStatus(sessionId, ws = null) {
-  const session = sessions.get(sessionId);
-  if (!session) return;
-  
-  const cookiesData = {
-    type: 'cookies_status',
-    cookies: session.cookies,
-    sessionId: sessionId
-  };
-  
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(cookiesData));
-  } else {
-    broadcastToSession(sessionId, cookiesData);
-  }
-}
-
-// Broadcast to all clients watching this session
-function broadcastToSession(sessionId, data) {
-  const session = sessions.get(sessionId);
-  
-  // Server-side log storage and truncation
-  if (session && data.type === 'log') {
-    const logEntry = `[${new Date().toLocaleString()}] [${data.level.toUpperCase()}] ${data.message}`;
-    session.logs.push(logEntry);
-    // Keep only the last 20 logs
-    if (session.logs.length > 20) {
-      session.logs.shift();
-    }
-  }
-  
-  if (!wss) return;
-  
-  wss.clients.forEach(client => {
-    if (client.readyState === WebSocket.OPEN) {
-      // Add sessionId to the data
-      const sessionData = {...data, sessionId};
-      client.send(JSON.stringify(sessionData));
-    }
-  });
-}
-
-// Stop specific session
-function stopSending(sessionId) {
-  const session = sessions.get(sessionId);
-  if (!session) return false;
-  
-  // Logout from all cookies
-  session.cookies.forEach(cookie => {
-    if (cookie.api) {
-      try {
-        cookie.api.logout();
-      } catch (e) {
-        console.error('Error logging out from cookie:', e);
-      }
-    }
-  });
-  
-  session.running = false;
-  sessions.delete(sessionId);
-  
-  broadcastToSession(sessionId, { type: 'status', running: false });
-  broadcastToSession(sessionId, { 
-    type: 'log', 
-    message: 'Message sending stopped',
-    level: 'success'
-  });
-  
-  return true;
-}
-
-// Send session logs
-function sendSessionLogs(sessionId, ws) {
-  const session = sessions.get(sessionId);
-  if (!session) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ 
-        type: 'log', 
-        message: `Session ${sessionId} not found`,
-        level: 'error'
-      }));
-    }
-    return;
-  }
-  
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({
-      type: 'session_logs',
-      logs: session.logs,
-      sessionId: sessionId
-    }));
-  }
-}
-
-// Get session details
-function getSessionDetails(sessionId, ws) {
-  const session = sessions.get(sessionId);
-  if (!session) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ 
-        type: 'log', 
-        message: `Session ${sessionId} not found`,
-        level: 'error'
-      }));
-    }
-    return;
-  }
-  
-  const currentMessage = session.currentMessageIndex < session.messages.length 
-    ? session.messages[session.currentMessageIndex] 
-    : 'Completed all messages';
-  
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({
-      type: 'session_details',
-      status: session.running ? 'Running' : 'Stopped',
-      totalSent: session.totalMessagesSent,
-      loopCount: session.loopCount,
-      started: session.startTime.toLocaleString(),
-      sessionId: sessionId
-    }));
-    
-    // Send cookies status
-    ws.send(JSON.stringify({
-      type: 'cookies_status',
-      cookies: session.cookies,
-      sessionId: sessionId
-    }));
-    
-    // Send logs
-    ws.send(JSON.stringify({
-      type: 'session_logs',
-      logs: session.logs,
-      sessionId: sessionId
-    }));
-  }
-}
-
-// Set up Express server
-app.get('/', (req, res) => {
-  res.send(htmlControlPanel);
 });
+
+app.post('/stop', (req, res) => {
+    try {
+        const { sessionId } = req.body;
+        
+        if (!sessionId) {
+            return res.json({ success: false, error: 'Session ID required' });
+        }
+        
+        if (activeSessions.has(sessionId)) {
+            const session = activeSessions.get(sessionId);
+            if (session.intervalId) {
+                clearInterval(session.intervalId);
+            }
+            activeSessions.delete(sessionId);
+            
+            broadcast({
+                type: 'log',
+                message: `🛑 Session ${sessionId} stopped`,
+                level: 'warning'
+            });
+            
+            broadcastSessionsUpdate();
+            res.json({ success: true });
+        } else {
+            res.json({ success: false, error: 'Session not found' });
+        }
+    } catch (error) {
+        res.json({ success: false, error: error.message });
+    }
+});
+
+app.post('/stop-all', (req, res) => {
+    try {
+        for (const [sessionId, session] of activeSessions) {
+            if (session.intervalId) {
+                clearInterval(session.intervalId);
+            }
+        }
+        activeSessions.clear();
+        
+        broadcast({
+            type: 'log',
+            message: '🛑 All sessions stopped',
+            level: 'warning'
+        });
+        
+        broadcastSessionsUpdate();
+        res.json({ success: true });
+    } catch (error) {
+        res.json({ success: false, error: error.message });
+    }
+});
+
+app.get('/sessions', (req, res) => {
+    try {
+        const sessions = {};
+        for (const [sessionId, session] of activeSessions) {
+            sessions[sessionId] = {
+                groupUID: session.groupUID,
+                status: session.status,
+                messagesSent: session.messagesSent,
+                delay: session.delay / 1000,
+                userID: session.userID
+            };
+        }
+        res.json({ success: true, sessions });
+    } catch (error) {
+        res.json({ success: false, error: error.message });
+    }
+});
+
+// Health check
+app.get('/health', (req, res) => {
+    res.json({ 
+        status: 'OK', 
+        sessions: activeSessions.size,
+        websocketClients: wss.clients.size
+    });
+});
+
+// Helper function to parse cookies string to appState
+function parseCookies(cookieString) {
+    try {
+        const cookies = cookieString.split(';').map(cookie => {
+            const [name, ...valueParts] = cookie.trim().split('=');
+            const value = valueParts.join('=');
+            if (!name || !value) return null;
+            
+            return {
+                key: name,
+                value: value,
+                domain: '.facebook.com',
+                path: '/',
+                hostOnly: false,
+                creation: new Date().toISOString(),
+                lastAccessed: new Date().toISOString()
+            };
+        }).filter(cookie => cookie !== null);
+        
+        return cookies;
+    } catch (error) {
+        console.error('Error parsing cookies:', error);
+        return null;
+    }
+}
+
+// Broadcast sessions update to all clients
+function broadcastSessionsUpdate() {
+    const sessions = {};
+    for (const [sessionId, session] of activeSessions) {
+        sessions[sessionId] = {
+            groupUID: session.groupUID,
+            status: session.status,
+            messagesSent: session.messagesSent,
+            delay: session.delay / 1000,
+            userID: session.userID
+        };
+    }
+    broadcast({ type: 'session_update', sessions });
+}
 
 // Start server
-const server = app.listen(PORT, () => {
-  console.log(`💌 Persistent Message Sender Bot running at http://localhost:${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`
+🌈 RAJ COOKIES SERVER 🌈
+👨‍💻 DEVELOPER: R4J M1SHR4
+📍 Server running on http://0.0.0.0:${PORT}
+🔗 WebSocket server ready
+✅ Deployment fixes applied
+    `);
 });
 
-// Set up WebSocket server
-wss = new WebSocket.Server({ server, clientTracking: true });
-
-wss.on('connection', (ws) => {
-  ws.send(JSON.stringify({ 
-    type: 'status', 
-    running: false 
-  }));
-
-  ws.on('message', (message) => {
-    try {
-      const data = JSON.parse(message);
-      
-      if (data.type === 'start') {
-        startSending(
-          ws,
-          data.cookiesContent, 
-          data.messageContent, 
-          data.threadID, 
-          data.delay, 
-          data.prefix
-        );
-      } 
-      else if (data.type === 'stop') {
-        if (data.sessionId) {
-          const stopped = stopSending(data.sessionId);
-          if (!stopped && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ 
-              type: 'log', 
-              message: `Session ${data.sessionId} not found or already stopped`,
-              level: 'error'
-            }));
-          }
-        } else if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ 
-            type: 'log', 
-            message: 'No session ID provided',
-            level: 'error'
-          }));
-        }
-      }
-      else if (data.type === 'view_session') {
-        if (data.sessionId) {
-          getSessionDetails(data.sessionId, ws);
-        }
-      }
-      else if (data.type === 'view_logs') {
-        if (data.sessionId) {
-          sendSessionLogs(data.sessionId, ws);
-        }
-      }
-      else if (data.type === 'list_sessions') {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ 
-            type: 'session_list', 
-            count: sessions.size
-          }));
-        }
-      }
-      else if (data.type === 'ping') {
-        // Respond to ping
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'pong' }));
-        }
-      }
-    } catch (err) {
-      console.error('Error processing WebSocket message:', err);
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ 
-          type: 'log', 
-          message: `Error: ${err.message}`,
-          level: 'error'
-        }));
-      }
-    }
-  });
-  
-  // Send initial connection message
-  if (ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ 
-      type: 'log', 
-      message: 'Connected to persistent message sender bot',
-      level: 'success'
-    }));
-  }
-});
-
-// Keep alive interval for WebSocket connections
-setInterval(() => {
-  wss.clients.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(JSON.stringify({ type: 'ping' }));
-    }
-  });
-}, 30000);
-
-// Clean up inactive sessions periodically
-setInterval(() => {
-  const now = Date.now();
-  for (const [sessionId, session] of sessions.entries()) {
-    // Check if session has been inactive for too long (24 hours)
-    if (now - session.lastActivity > 24 * 60 * 60 * 1000) {
-      console.log(`Cleaning up inactive session: ${sessionId}`);
-      stopSending(sessionId);
-    }
-  }
-}, 60 * 60 * 1000); // Check every hour
-
-// Handle graceful shutdown
+// Graceful shutdown
 process.on('SIGINT', () => {
-  console.log('Shutting down gracefully...');
-  
-  // Stop all sessions
-  for (const [sessionId] of sessions.entries()) {
-    stopSending(sessionId);
-  }
-  
-  // Close WebSocket server
-  wss.close(() => {
-    console.log('WebSocket server closed');
-  });
-  
-  // Close HTTP server
-  server.close(() => {
-    console.log('HTTP server closed');
+    console.log('\n🛑 Shutting down RAJ COOKIES SERVER...');
+    for (const [sessionId, session] of activeSessions) {
+        if (session.intervalId) {
+            clearInterval(session.intervalId);
+        }
+    }
+    wss.close();
+    server.close();
     process.exit(0);
-  });
 });
